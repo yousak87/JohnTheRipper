@@ -48,7 +48,7 @@ static void rpp_add_char(struct rpp_range *range, unsigned char c)
 	range->chars[range->count++] = (char)c;
 }
 
-static void rpp_process_rule(struct rpp_context *ctx)
+void rpp_process_rule(struct rpp_context *ctx)
 {
 	struct rpp_range *range;
 	unsigned char *input, *output, *end;
@@ -120,6 +120,12 @@ static void rpp_process_rule(struct rpp_context *ctx)
 			break;
 		case 'd':
 			input = (unsigned char *)"[0-9]";
+			break;
+		case 's':
+			input = (unsigned char *)"[!-/:-@[-`{-~]";
+			break;
+		case 'a':
+			input = (unsigned char *)"[!-~]";
 			break;
 		default:
 			saved_input = NULL;
@@ -260,4 +266,59 @@ char *rpp_next(struct rpp_context *ctx)
 	}
 
 	return ctx->output;
+}
+
+char *msk_next(struct rpp_context *rpp_ctx, struct mask_context *msk_ctx, int *flag)
+{
+	struct rpp_range *range;
+	int index, done, i;
+	static int skipcurrentidx = 0x7fffffff, processcurrentidx=0x7fffffff;
+
+	done = 1;
+	if((*flag)) return NULL;
+
+	if ((index = rpp_ctx->count - 1) >= 0) {
+
+		do {
+			range = &rpp_ctx->ranges[index];
+			*range->pos = range->chars[range->index];
+		} while (index--);
+
+		index = rpp_ctx->count - 1;
+
+		do {
+			if(skipcurrentidx == index) goto next_idx;
+			if(processcurrentidx == index) goto skip_search;
+			for (i = 0; i < msk_ctx -> count; i++) {
+				if(msk_ctx -> activeRangePos[i] == index) {
+					skipcurrentidx = index;
+					goto next_idx;
+				}
+			}
+			processcurrentidx = index;
+skip_search:            ;
+			range = &rpp_ctx->ranges[index];
+			if (range->flag_p > 0)
+				continue;
+			if (++range->index < range->count) {
+				if (range->flag_p)
+					continue;
+				else
+					break;
+			}
+			range->index = 0;
+
+next_idx: 		;
+		} while (index--);
+		done = index < 0;
+
+	}
+
+	if (done) {
+		rpp_ctx->input = rpp_ctx->input->next;
+		rpp_ctx->count = -1;
+		*flag = 1;
+	}
+	//printf("%s\n",rpp_ctx->output);
+	return rpp_ctx->output;
 }
