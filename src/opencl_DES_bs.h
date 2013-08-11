@@ -23,7 +23,7 @@
 
 #define DES_bs_vector			WORD
 
-#define MULTIPLIER                      (524288)
+#define MULTIPLIER                      (524288*2)
 
 
 #define MIN_KEYS_PER_CRYPT		MULTIPLIER

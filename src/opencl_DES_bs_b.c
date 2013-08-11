@@ -131,7 +131,7 @@ void opencl_DES_reset(struct db_main *db) {
 			HANDLE_CLERROR(clSetKernelArg(crk_kernel_mm, 7, sizeof(cl_mem), &buffer_outKeyIdx), "Set Kernel Arg krnl FAILED arg7\n");
 
 			/* Expected number of keys to be generated on GPU per work item. Actual number will vary depending on the mask but it should be close */
-			db -> max_int_keys = 1000;
+			db -> max_int_keys = 1500;
 
 			DB = db;
 
@@ -139,8 +139,8 @@ void opencl_DES_reset(struct db_main *db) {
 			db->format->methods.set_key = opencl_DES_bs_set_key_mm;
 			db->format->methods.get_key = opencl_DES_bs_get_key_mm;
 
-			db -> format -> params.max_keys_per_crypt = DES_global_work_size / 2  ;
-			db -> format -> params.min_keys_per_crypt = DES_global_work_size / 2  ;
+			db -> format -> params.max_keys_per_crypt = DES_global_work_size / 4  ;
+			db -> format -> params.min_keys_per_crypt = DES_global_work_size / 4  ;
 		}
 		/* For other modes */
 		else {
@@ -292,7 +292,8 @@ char *opencl_DES_bs_get_key_mm(int index)
 
 	int keyIdx = 0;
 	int section = index >> 5;
-
+/* There is a possiblity of wrong status check when
+ * status is checked just after a successfult password crack. */
 	if((section < num_loaded_hashes) && cmp_out) {
 		int section = index >> 5;
 		//fprintf(stderr, "InGetKey%0x", index);
@@ -319,7 +320,8 @@ static char *opencl_DES_bs_get_key_om(int index)
 	char *dst;
 
 	section = index >> 5;
-
+/* There is a possiblity of wrong status check when
+ * status is checked just after a successfult password crack. */
 	if((section < num_loaded_hashes) && cmp_out)
 		index = ((outKeyIdx[section] & 0x7fffffff) << 5) + index % DES_BS_DEPTH;
 
@@ -418,7 +420,7 @@ static void find_best_gws(struct fmt_main *fmt)
 		speed = ((double)count) / savetime;
 	} while(diff > 0.01);
 
-	if (options.verbosity > 3)
+	if (options.verbosity > 1)
 		fprintf(stderr, "Optimal Global Work Size:%d\n",
 		        count);
 
@@ -443,13 +445,13 @@ void DES_bs_select_device(struct fmt_main *fmt)
 	HANDLE_CLERROR(ret_code,"Error creating kernel DES_bs_25_self_test");
 
 	errMsg = "Create Buffer FAILED.";
-	opencl_DES_bs_data_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, MULTIPLIER * sizeof(opencl_DES_bs_transfer), NULL, &ret_code);
+	opencl_DES_bs_data_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, ((MULTIPLIER >> DES_BS_LOG2) + 15) * sizeof(opencl_DES_bs_transfer), NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, errMsg);
 	index768_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, 768 * sizeof(unsigned int), NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, errMsg);
 	index96_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, 96 * sizeof(unsigned int), NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, errMsg);
-	B_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, 64 * MULTIPLIER * sizeof(DES_bs_vector), NULL, &ret_code);
+	B_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, 2 * (MULTIPLIER + 15) * sizeof(DES_bs_vector), NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, errMsg);
 
 	HANDLE_CLERROR(clSetKernelArg(crypt_kernel, 0, sizeof(cl_mem), &index768_gpu), "Set Kernel Arg FAILED arg0\n");

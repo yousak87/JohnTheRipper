@@ -137,12 +137,12 @@ void opencl_DES_reset(struct db_main *db) {
 
 		if(mask_mode) {
 			/* Expected number of keys to be generated on GPU per work item. Actual number will vary depending on the mask but it should be close */
-			db -> max_int_keys = 1000;
+			db -> max_int_keys = 1500;
 
 			DB = db;
 
-			db -> format -> params.max_keys_per_crypt = DES_global_work_size / 2;
-			db -> format -> params.min_keys_per_crypt = DES_global_work_size / 2;
+			db -> format -> params.max_keys_per_crypt = DES_global_work_size / 4;
+			db -> format -> params.min_keys_per_crypt = DES_global_work_size / 4;
 
 			db->format->methods.crypt_all = opencl_DES_bs_crypt_25_mm;
 			db->format->methods.get_key = opencl_DES_bs_get_key_mm;
@@ -274,7 +274,8 @@ static char *opencl_DES_bs_get_key_mm(int index)
 
 	int keyIdx = 0;
 	int section = index >> 5;
-
+/* There is a possiblity of wrong status check when
+ * status is checked just after a successfult password crack. */
 	if((section < num_loaded_hashes) && cmp_out) {
 		int section = index >> 5;
 		//fprintf(stderr, "InGetKey%0x", index);
@@ -301,7 +302,8 @@ static char *opencl_DES_bs_get_key_om(int index)
 	char *dst;
 
 	section = index >> 5;
-
+/* There is a possiblity of wrong status check when
+ * status is checked just after a successfult password crack. */
 	if((section < num_loaded_hashes) && cmp_out)
 		index = ((outKeyIdx[section] & 0x7fffffff) << 5) + index % DES_BS_DEPTH;
 
