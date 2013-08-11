@@ -51,7 +51,7 @@ static void init(struct fmt_main *pFmt)
 
 	opencl_DES_bs_init_global_variables();
 
-	for(i=0;i<MULTIPLIER;i++)
+	for ( i = 0; i < (MULTIPLIER >> DES_BS_LOG2);i++)
 		opencl_DES_bs_init(0, DES_bs_cpt, i);
 
 	global_work_size = 0;

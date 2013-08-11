@@ -13,6 +13,8 @@
 
 #if !HARDCODE_SALT
 
+#define DES_DEBUG 0
+
 typedef unsigned WORD vtype;
 
 /* Common parameters required for all kernels */
@@ -35,13 +37,14 @@ static struct mask_context msk_ctx;
 static struct db_main *DB;
 static cl_kernel crk_kernel_mm;
 
-/* Variable for thes modes */
+/* Variable for other modes */
 static cl_kernel crk_kernel_om;
 
 /* Other housekeeping variables */
 static int set_salt = 0;
 static unsigned int keys_changed = 0;
 static size_t DES_local_work_size = WORK_GROUP_SIZE;
+static size_t DES_global_work_size = MULTIPLIER;
 static int self_test = 1; // This flag is reset to zero befor craking
 static int mask_mode = 0;
 
@@ -97,8 +100,8 @@ void opencl_DES_reset(struct db_main *db) {
 		} while((salt = salt->next));
 
 		/* Each work item receives one key, so set the following parameters to tuned GWS for format. */
-		db -> format -> params.max_keys_per_crypt = MULTIPLIER;
-		db -> format -> params.min_keys_per_crypt = MULTIPLIER;
+		db -> format -> params.max_keys_per_crypt = DES_global_work_size;
+		db -> format -> params.min_keys_per_crypt = WORK_GROUP_SIZE * DES_BS_DEPTH;
 
 		loaded_hashes = (unsigned int*)mem_alloc((db->password_count) * sizeof(int) * 2);
 		outKeyIdx     = (unsigned int*)mem_calloc((db->password_count) * sizeof(unsigned int) * 2);
@@ -135,6 +138,9 @@ void opencl_DES_reset(struct db_main *db) {
 			db->format->methods.crypt_all = opencl_DES_bs_crypt_25_mm;
 			db->format->methods.set_key = opencl_DES_bs_set_key_mm;
 			db->format->methods.get_key = opencl_DES_bs_get_key_mm;
+
+			db -> format -> params.max_keys_per_crypt = DES_global_work_size / 2  ;
+			db -> format -> params.min_keys_per_crypt = DES_global_work_size / 2  ;
 		}
 		/* For other modes */
 		else {
@@ -193,9 +199,9 @@ static void check_mask_descrypt(struct mask_context *msk_ctx) {
 
 void opencl_DES_bs_init_global_variables() {
 
-	B = (DES_bs_vector*) mem_alloc (MULTIPLIER * 64 * sizeof(DES_bs_vector));
-	opencl_DES_bs_all = (opencl_DES_bs_combined*) mem_alloc (MULTIPLIER * sizeof(opencl_DES_bs_combined));
-	opencl_DES_bs_data = (opencl_DES_bs_transfer*) mem_alloc (MULTIPLIER * sizeof(opencl_DES_bs_transfer));
+	B = (DES_bs_vector*) mem_alloc (MULTIPLIER * 2 * sizeof(DES_bs_vector));
+	opencl_DES_bs_all = (opencl_DES_bs_combined*) mem_alloc (((MULTIPLIER >> DES_BS_LOG2) + 15) * sizeof(opencl_DES_bs_combined));
+	opencl_DES_bs_data = (opencl_DES_bs_transfer*) mem_alloc (((MULTIPLIER >> DES_BS_LOG2) + 15) * sizeof(opencl_DES_bs_transfer));
 	input_keys = (unsigned char *) mem_alloc( MULTIPLIER * 8);
 }
 /* This function is used for self_test and other modes except mask mode */
@@ -232,9 +238,12 @@ void opencl_DES_bs_set_key_self_test(char *key, int index)
 void opencl_DES_bs_set_key_mm(char *key, int index)
 {
 	keyCount++;
-	memcpy(input_keys + 8 * index, key , 8);
-	if(!keys_changed)
+	if(!keys_changed) {
 		keys_changed = 1;
+		memset(input_keys, 0 , 8 * MULTIPLIER);
+	}
+	memcpy(input_keys + 8 * index, key , 8);
+
 
 }
 
@@ -284,10 +293,10 @@ char *opencl_DES_bs_get_key_mm(int index)
 	int keyIdx = 0;
 	int section = index >> 5;
 
-	if(section < num_loaded_hashes) {
+	if((section < num_loaded_hashes) && cmp_out) {
 		int section = index >> 5;
 		//fprintf(stderr, "InGetKey%0x", index);
-		keyIdx = outKeyIdx[section + num_loaded_hashes] + index % 32;
+		keyIdx = outKeyIdx[section + num_loaded_hashes] + index % DES_BS_DEPTH;
 		index = outKeyIdx[section] & 0x7fffffff;
 		//fprintf(stderr, "InGetKey%0x %0x ", index, MAX_KEYS_PER_CRYPT);
 	}
@@ -311,7 +320,7 @@ static char *opencl_DES_bs_get_key_om(int index)
 
 	section = index >> 5;
 
-	if(section < num_loaded_hashes)
+	if((section < num_loaded_hashes) && cmp_out)
 		index = ((outKeyIdx[section] & 0x7fffffff) << 5) + index % DES_BS_DEPTH;
 
 	index = (index > (MULTIPLIER - 1))? MULTIPLIER - 1 : index;
@@ -380,26 +389,23 @@ static void find_best_gws(struct fmt_main *fmt)
 {
 	struct timeval start, end;
 	double savetime;
-	long int count = 64;
+	unsigned int count = WORK_GROUP_SIZE * DES_BS_DEPTH;
 	double speed = 999999, diff;
-	int ccount;
 
 	gettimeofday(&start, NULL);
-	ccount = count * WORK_GROUP_SIZE * DES_BS_DEPTH;
-	opencl_DES_bs_crypt_25_self_test(&ccount, NULL);
+	opencl_DES_bs_crypt_25_self_test((int*)&count, NULL);
 	gettimeofday(&end, NULL);
 	savetime = (end.tv_sec - start.tv_sec) + (double)(end.tv_usec - start.tv_usec) / 1000000.000;
 	speed = ((double)count) / savetime;
 	do {
 		count *= 2;
-		if ((count * WORK_GROUP_SIZE) > MULTIPLIER) {
+		if ((count) > MULTIPLIER) {
 			count = count >> 1;
 			break;
 
 		}
 		gettimeofday(&start, NULL);
-		ccount = count * WORK_GROUP_SIZE * DES_BS_DEPTH;
-		opencl_DES_bs_crypt_25_self_test(&ccount, NULL);
+		opencl_DES_bs_crypt_25_self_test((int*)&count, NULL);
 		gettimeofday(&end, NULL);
 		savetime = (end.tv_sec - start.tv_sec) + (double)(end.tv_usec - start.tv_usec) / 1000000.000;
 		diff = (((double)count) / savetime) / speed;
@@ -413,17 +419,15 @@ static void find_best_gws(struct fmt_main *fmt)
 	} while(diff > 0.01);
 
 	if (options.verbosity > 3)
-		fprintf(stderr, "Optimal Global Work Size:%ld\n",
-		        count * WORK_GROUP_SIZE * DES_BS_DEPTH);
+		fprintf(stderr, "Optimal Global Work Size:%d\n",
+		        count);
 
-	//fmt -> params.max_keys_per_crypt = DES_BS_DEPTH;
-	//fmt -> params.min_keys_per_crypt = DES_BS_DEPTH;
+	fmt -> params.max_keys_per_crypt = DES_global_work_size = count;
+	fmt -> params.min_keys_per_crypt = DES_BS_DEPTH * WORK_GROUP_SIZE;
 }
 
 void DES_bs_select_device(struct fmt_main *fmt)
 {
-	//char *env;
-	//size_t max_lws;
 	const char *errMsg;
 
 	opencl_prepare_dev(ocl_gpu_id);
@@ -437,18 +441,6 @@ void DES_bs_select_device(struct fmt_main *fmt)
 
 	crypt_kernel = clCreateKernel(program[ocl_gpu_id], "DES_bs_25_self_test", &ret_code) ;
 	HANDLE_CLERROR(ret_code,"Error creating kernel DES_bs_25_self_test");
-
-	/* Honour this for testing and --test=0 */
-	//if ((env = getenv("LWS")))
-	//	DES_local_work_size = atoi(env);
-
-	/* Cap LWS at device limit... */
-	//HANDLE_CLERROR(clGetKernelWorkGroupInfo(, devices[ocl_gpu_id], CL_KERNEL_WORK_GROUP_SIZE, sizeof(max_lws), &max_lws, NULL), "Query max work group size");
-
-	/* ...but ensure GWS is still a multiple of LWS */
-	//while (DES_local_work_size > max_lws)
-		//DES_local_work_size >>= 1;
-	//fprintf(stderr, "Using LWS %zu\n", DES_local_work_size);
 
 	errMsg = "Create Buffer FAILED.";
 	opencl_DES_bs_data_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, MULTIPLIER * sizeof(opencl_DES_bs_transfer), NULL, &ret_code);
@@ -477,8 +469,8 @@ void DES_bs_select_device(struct fmt_main *fmt)
 		if (options.verbosity > 3)
 			fprintf(stderr, "Global worksize (GWS) forced to %zu\n",
 			        global_work_size);
-		//fmt -> params.max_keys_per_crypt = global_work_size;
-		//fmt -> params.min_keys_per_crypt = WORK_GROUP_SIZE * DES_BS_DEPTH ;
+		fmt -> params.max_keys_per_crypt = DES_global_work_size = global_work_size;
+		fmt -> params.min_keys_per_crypt = WORK_GROUP_SIZE * DES_BS_DEPTH ;
 	}
 
 	fmt->methods.crypt_all = opencl_DES_bs_crypt_25_self_test;
@@ -544,12 +536,14 @@ int opencl_DES_bs_crypt_25_self_test(int *pcount, struct db_salt *salt)
 	else
 		N = section;
 
+	//fprintf(stderr, "%d\n",N);
+
 	if (set_salt == 1) {
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], index96_gpu, CL_TRUE, 0, 96 * sizeof(unsigned int), index96, 0, NULL, NULL), "Failed Copy data to gpu");
 		set_salt = 0;
 	}
 	if(keys_changed) {
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], opencl_DES_bs_data_gpu, CL_TRUE, 0, MULTIPLIER * sizeof(opencl_DES_bs_transfer), opencl_DES_bs_data, 0, NULL, NULL ), "Failed Copy data to gpu");
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], opencl_DES_bs_data_gpu, CL_TRUE, 0, N * sizeof(opencl_DES_bs_transfer), opencl_DES_bs_data, 0, NULL, NULL ), "Failed Copy data to gpu");
 		keys_changed = 0;
 	}
 	ret_code = clEnqueueNDRangeKernel(queue[ocl_gpu_id], crypt_kernel, 1, NULL, &N, &M, 0, NULL, &evnt);
@@ -557,7 +551,7 @@ int opencl_DES_bs_crypt_25_self_test(int *pcount, struct db_salt *salt)
 
 	clWaitForEvents(1, &evnt);
 
-	HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu, CL_TRUE, 0, MULTIPLIER * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL), "Write FAILED\n");
+	HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu, CL_TRUE, 0, N * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL), "Write FAILED\n");
 	clFinish(queue[ocl_gpu_id]);
 	return keys_count;
 }
@@ -566,7 +560,8 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 {
 	int keys_count = *pcount;
 	unsigned int sections = 0;
-	int i = 0, *bin, j;
+	static unsigned int int_keys = 1;
+	int i = 0, *bin;
 	struct db_password *pw;
 	static int flag = 1;
 	cl_event evnt;
@@ -597,7 +592,7 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 	//printf("%d\n",loaded_hashes[salt->count-1 + salt -> count]);
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], loaded_hashes_gpu, CL_TRUE, 0, (salt -> count) * sizeof(int) * 2, loaded_hashes, 0, NULL, NULL ), "Failed Copy data to gpu");
 	if (keys_changed) {
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], transfer_keys_gpu, CL_TRUE, 0, 8 * MULTIPLIER, input_keys, 0, NULL, NULL ), "Failed Copy data to gpu");
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], transfer_keys_gpu, CL_TRUE, 0, 8 * N, input_keys, 0, NULL, NULL ), "Failed Copy data to gpu");
 		keys_changed = 0;
 	}
 	HANDLE_CLERROR(clSetKernelArg(crk_kernel_mm, 4, sizeof(int), &(salt->count)), "Set Kernel krnl Arg 5 :FAILED") ;
@@ -609,22 +604,29 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 		}
 		memcpy(&msk_ctx, DB->msk_ctx, sizeof(struct mask_context));
 		check_mask_descrypt(&msk_ctx);
+		int_keys = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			int_keys *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+#if DES_DEBUG
+		fprintf(stderr, "Multiply the end c/s with:%d\n", int_keys);
+		int j;
 		for(i = 0; i < 8; i++)
 			printf("%d ",msk_ctx.activeRangePos[i]);
 			printf("\n");
 			for(i = 0; i < msk_ctx.count; i++){
-			for(j = 0; j < msk_ctx.ranges[msk_ctx.activeRangePos[i]].count; j++)
-				printf("%c ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].chars[j]);
-			printf("\n");
-			//checkRange(&msk_ctx, msk_ctx.activeRangePos[i]) ;
-			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
-			printf("\n");
+				for(j = 0; j < msk_ctx.ranges[msk_ctx.activeRangePos[i]].count; j++)
+					printf("%c ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].chars[j]);
+				printf("\n");
+				printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
+			      printf("\n");
 			}
-			HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
-			flag = 0;
-		}
+#endif
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
+		flag = 0;
+	}
 
-	*pcount = (sections * 32) ;
+
+	*pcount = (sections * int_keys) ;
 
 	ret_code = clEnqueueNDRangeKernel(queue[ocl_gpu_id], crk_kernel_mm, 1, NULL, &N, &M, 0, NULL, &evnt);
 	HANDLE_CLERROR(ret_code, "Enque Kernel Failed");
@@ -637,9 +639,9 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 	// If a positive match is found outKeyIdx contains some positive (gid | 0x80000000) value else contains 0
 	for(i = 0; i < ((salt->count) & (~cmp_out)); i++)
 		cmp_out = outKeyIdx[i]?0xffffffff:0;
-
+#if DES_DEBUG
 	printf("CMP out %d %d %d\n", cmp_out, (salt->sequential_id), keyCount);
-
+#endif
 	if (cmp_out) {
 		max = 0;
 		min = salt->count;
@@ -653,7 +655,9 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 		}
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu, CL_TRUE, 0, (salt -> count) * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL), "Write FAILED\n");
 		clFinish(queue[ocl_gpu_id]);
+#if DES_DEBUG
 		printf("crypt all %d\n",max + 1);
+#endif
 		return (max + 1) * DES_BS_DEPTH ;
 	}
 	else return 0;
@@ -680,7 +684,7 @@ int opencl_DES_bs_crypt_25_om(int *pcount, struct db_salt *salt)
 		N = (section / DES_local_work_size + 1) * DES_local_work_size ;
 	else
 		N = section;
-
+	//fprintf(stderr, "%d\n",N);
 	if (set_salt == 1) {
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], index96_gpu, CL_TRUE, 0, 96 * sizeof(unsigned int), index96, 0, NULL, NULL), "Failed Copy data to gpu");
 		set_salt = 0;
@@ -697,7 +701,7 @@ int opencl_DES_bs_crypt_25_om(int *pcount, struct db_salt *salt)
 	//printf("%d\n",loaded_hashes[salt->count-1 + salt -> count]);
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], loaded_hashes_gpu, CL_TRUE, 0, (salt -> count) * sizeof(int) * 2, loaded_hashes, 0, NULL, NULL ), "Failed Copy data to gpu");
 	if(keys_changed) {
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], opencl_DES_bs_data_gpu, CL_TRUE, 0, MULTIPLIER * sizeof(opencl_DES_bs_transfer), opencl_DES_bs_data, 0, NULL, NULL ), "Failed Copy data to gpu");
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], opencl_DES_bs_data_gpu, CL_TRUE, 0, N * sizeof(opencl_DES_bs_transfer), opencl_DES_bs_data, 0, NULL, NULL ), "Failed Copy data to gpu");
 		keys_changed = 0;
 	}
 	HANDLE_CLERROR(clSetKernelArg(crk_kernel_om, 5, sizeof(int), &(salt->count)), "Set Kernel krnl Arg 5 :FAILED") ;
@@ -713,9 +717,9 @@ int opencl_DES_bs_crypt_25_om(int *pcount, struct db_salt *salt)
 	// If a positive match is found outKeyIdx contains some positive (gid | 0x80000000) value else contains 0
 	for(i = 0; i < ((salt->count) & (~cmp_out)); i++)
 		cmp_out = outKeyIdx[i]?0xffffffff:0;
-
+#if DES_DEBUG
 	printf("CMP out %d %d %d\n", cmp_out, (salt->sequential_id), keyCount);
-
+#endif
 	if (cmp_out) {
 		max = 0;
 		min = salt->count;
@@ -729,7 +733,9 @@ int opencl_DES_bs_crypt_25_om(int *pcount, struct db_salt *salt)
 		}
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu, CL_TRUE, 0, (salt -> count) * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL), "Write FAILED\n");
 		clFinish(queue[ocl_gpu_id]);
+#if DES_DEBUG
 		printf("crypt all %d\n",max + 1);
+#endif
 		return (max + 1) * DES_BS_DEPTH ;
 	}
 	else return 0;
