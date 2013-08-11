@@ -275,7 +275,7 @@ char *msk_next(struct rpp_context *rpp_ctx, struct mask_context *msk_ctx, int *f
 	static int skipcurrentidx = 0x7fffffff, processcurrentidx=0x7fffffff;
 
 	done = 1;
-	if((*flag)) return NULL;
+	if(*flag) return NULL;
 
 	if ((index = rpp_ctx->count - 1) >= 0) {
 
