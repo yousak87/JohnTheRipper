@@ -199,7 +199,7 @@ static void check_mask_descrypt(struct mask_context *msk_ctx) {
 
 void opencl_DES_bs_init_global_variables() {
 
-	B = (DES_bs_vector*) mem_alloc (MULTIPLIER * 2 * sizeof(DES_bs_vector));
+	B = (DES_bs_vector*) mem_alloc ((MULTIPLIER + 15)* 2 * sizeof(DES_bs_vector));
 	opencl_DES_bs_all = (opencl_DES_bs_combined*) mem_alloc (((MULTIPLIER >> DES_BS_LOG2) + 15) * sizeof(opencl_DES_bs_combined));
 	opencl_DES_bs_data = (opencl_DES_bs_transfer*) mem_alloc (((MULTIPLIER >> DES_BS_LOG2) + 15) * sizeof(opencl_DES_bs_transfer));
 	input_keys = (unsigned char *) mem_alloc( MULTIPLIER * 8);
@@ -460,8 +460,13 @@ void DES_bs_select_device(struct fmt_main *fmt)
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], index768_gpu, CL_TRUE, 0, 768*sizeof(unsigned int), index768, 0, NULL, NULL ), "Failed Copy data to gpu");
 
 	/* Check if the mask is being used */
-	if(options.mask)
+	if(options.mask) {
 		mask_mode = 1;
+		if(options.wordlist) {
+			fprintf(stderr, "mask + wordlist not supported by this format.\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	if (!global_work_size)
 		find_best_gws(fmt);

@@ -485,8 +485,13 @@ void DES_bs_select_device(struct fmt_main *fmt)
 	init_dev();
 
 	/* Check if the mask is being used */
-	if(options.mask)
+	if (options.mask) {
 		mask_mode = 1;
+		if (options.wordlist) {
+			fprintf(stderr, "mask + wordlist not supported by this format.\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	if(!global_work_size)
 		find_best_gws(fmt);
