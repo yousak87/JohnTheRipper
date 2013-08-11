@@ -18,7 +18,6 @@
 #define BENCHMARK_COMMENT		""
 #define BENCHMARK_LENGTH		0
 
-#define PLAINTEXT_LENGTH		8
 #define CIPHERTEXT_LENGTH_1		13
 #define CIPHERTEXT_LENGTH_2		24
 
@@ -53,7 +52,7 @@ static void init(struct fmt_main *pFmt)
 	opencl_DES_bs_init_global_variables();
 
 	for(i=0;i<MULTIPLIER;i++)
-		opencl_DES_bs_init(0, DES_bs_cpt,i);
+		opencl_DES_bs_init(0, DES_bs_cpt, i);
 
 	global_work_size = 0;
 
@@ -64,6 +63,9 @@ static void init(struct fmt_main *pFmt)
 		global_work_size = atoi(conf);
 
 	DES_bs_select_device(pFmt);
+
+	atexit(done);
+
 }
 
 static int valid(char *ciphertext, struct fmt_main *pFmt)
@@ -113,6 +115,41 @@ static void *salt(char *ciphertext)
 	return &out;
 }
 
+static int binary_hash_0(void *binary)
+{
+	return *(WORD *)binary & 0xF;
+}
+
+static int binary_hash_1(void *binary)
+{
+	return *(WORD *)binary & 0xFF;
+}
+
+static int binary_hash_2(void *binary)
+{
+	return *(WORD *)binary & 0xFFF;
+}
+
+static int binary_hash_3(void *binary)
+{
+	return *(WORD *)binary & 0xFFFF;
+}
+
+static int binary_hash_4(void *binary)
+{
+	return *(WORD *)binary & 0xFFFFF;
+}
+
+static int binary_hash_5(void *binary)
+{
+	return *(WORD *)binary & 0xFFFFFF;
+}
+
+static int binary_hash_6(void *binary)
+{
+	return *(WORD *)binary & 0x7FFFFFF;
+}
+
 #define get_hash_0 opencl_DES_bs_get_hash_0
 #define get_hash_1 opencl_DES_bs_get_hash_1
 #define get_hash_2 opencl_DES_bs_get_hash_2
@@ -136,28 +173,6 @@ static int cmp_exact(char *source, int index)
 	return opencl_DES_bs_cmp_one_b(opencl_DES_bs_get_binary(source), 64, index);
 }
 
-static char *get_key(int index)
-{
-	static char out[PLAINTEXT_LENGTH + 1];
-	unsigned int sector,block;
-	unsigned char *src;
-	char *dst;
-	sector = index/DES_BS_DEPTH;
-	block  = index%DES_BS_DEPTH;
-	init_t();
-
-	src = opencl_DES_bs_all[sector].pxkeys[block];
-	dst = out;
-	while (dst < &out[PLAINTEXT_LENGTH] && (*dst = *src)) {
-		src += sizeof(DES_bs_vector) * 8;
-		dst++;
-	}
-	*dst = 0;
-
-
-	return out;
-}
-
 struct fmt_main fmt_opencl_DES = {
 	{
 		FORMAT_LABEL,
@@ -176,7 +191,7 @@ struct fmt_main fmt_opencl_DES = {
 		tests
 	}, {
 		init,
-		done,
+		fmt_default_done,
 		opencl_DES_reset,
 		fmt_default_prepare,
 		valid,
@@ -188,20 +203,20 @@ struct fmt_main fmt_opencl_DES = {
 		salt,
 		fmt_default_source,
 		{
-			fmt_default_binary_hash_0,
-			fmt_default_binary_hash_1,
-			fmt_default_binary_hash_2,
-			fmt_default_binary_hash_3,
-			fmt_default_binary_hash_4,
-			fmt_default_binary_hash_5,
-			fmt_default_binary_hash_6
+			binary_hash_0,
+			binary_hash_1,
+			binary_hash_2,
+			binary_hash_3,
+			binary_hash_4,
+			binary_hash_5,
+			binary_hash_6
 		},
 		salt_hash,
 		set_salt,
-		opencl_DES_bs_set_key,
-		get_key,
+		opencl_DES_bs_set_key_self_test,
+		opencl_DES_bs_get_key_self_test,
 		fmt_default_clear_keys,
-		opencl_DES_bs_crypt_25,
+		opencl_DES_bs_crypt_25_self_test,
 		{
 			get_hash_0,
 			get_hash_1,

@@ -230,8 +230,8 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist)
 		while (fgets(line, sizeof(line), file) != NULL) {
 			memcpy(word, line, 128);
 			mask_offset = strlen(word) - 1;
-			while (mask_word =
-				msk_next(&rpp_ctx, &msk_ctx, &flag)) {
+			while ((mask_word =
+				msk_next(&rpp_ctx, &msk_ctx, &flag))) {
 				if (ext_filter(mask_word)) {
 					memcpy(word + mask_offset, mask_word,
 					    MASK_RANGES_MAX);

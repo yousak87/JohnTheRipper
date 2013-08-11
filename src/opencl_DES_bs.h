@@ -23,11 +23,13 @@
 
 #define DES_bs_vector			WORD
 
-#define MULTIPLIER                      (WORK_GROUP_SIZE*256)
+#define MULTIPLIER                      (WORK_GROUP_SIZE * (2048 + 256))//(WORK_GROUP_SIZE * 1024)0x100000
 
 
-#define MIN_KEYS_PER_CRYPT		(DES_BS_DEPTH*MULTIPLIER)
-#define MAX_KEYS_PER_CRYPT		(DES_BS_DEPTH*MULTIPLIER)
+#define MIN_KEYS_PER_CRYPT		MULTIPLIER
+#define MAX_KEYS_PER_CRYPT		MULTIPLIER
+
+#define PLAINTEXT_LENGTH		8
 
 #define GWS_CONFIG		        "des_GWS"
 
@@ -93,7 +95,8 @@ extern void opencl_DES_bs_set_salt(WORD salt);
 /*
  * Set a key for DES_bs_crypt() or DES_bs_crypt_LM(), respectively.
  */
-extern void opencl_DES_bs_set_key(char *key, int index);
+extern void opencl_DES_bs_set_key_self_test(char *key, int index);
+extern char* opencl_DES_bs_get_key_self_test(int index);
 extern void opencl_DES_bs_set_key_LM(char *key, int index);
 
 /*
@@ -105,7 +108,7 @@ extern void opencl_DES_bs_crypt(int count, int keys_count);
 /*
  * A simplified special-case implementation: 12-bit salts, 25 iterations.
  */
-extern int opencl_DES_bs_crypt_25(int *pcount, struct db_salt *salt);
+extern int opencl_DES_bs_crypt_25_self_test(int *pcount, struct db_salt *salt);
 
 /*
  * Another special-case version: a non-zero IV, no salts, no iterations.

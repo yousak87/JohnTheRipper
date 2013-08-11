@@ -129,134 +129,27 @@ void init_index(int LM)
 
 void opencl_DES_bs_init(int LM, int cpt,int block)
 {
-	//WORD **k;
+
 	int index;
-	//int p, q, s, round, bit;
-	//int c;
 
-	for_each_t(n) {
-/*
-#if DES_BS_EXPAND
-		if (LM)
-			k = opencl_DES_bs_all[block].KS.p;
-		else
-			k = opencl_DES_bs_all[block].KSp;
-#else
-		k = opencl_DES_bs_all[block].KS.p;
-#endif
-
-		s = 0;
-		for (round = 0; round < 16; round++) {
-			s += opencl_DES_ROT[round];
-			for (index = 0; index < 48; index++) {
-				p = opencl_DES_PC2[index];
-				q = p < 28 ? 0 : 28;
-				p += s;
-				while (p >= 28) p -= 28;
-				bit = opencl_DES_PC1[p + q];
-				bit ^= 070;
-				bit -= bit >> 3;
-				bit = 55 - bit;
-				if (LM) bit = DES_LM_KP[bit];
-				*k++ = &opencl_DES_bs_all[block].K[bit] START;
-			}
-		}*/
 	if(block==0)
 		init_index(LM);
-/*
- * Have keys go to bit layers where DES_bs_get_hash() and DES_bs_cmp_one()
- * currently expect them.
- */
-		for (index = 0; index < DES_BS_DEPTH; index++)
-			opencl_DES_bs_all[block].pxkeys[index] =
-			    &opencl_DES_bs_data[block].xkeys.c[0][index & 7][index >> 3];
 
-		if (LM) {
-			/*for (c = 0; c < 0x100; c++)
-#ifdef BENCH_BUILD
-			if (c >= 'a' && c <= 'z')
-				opencl_DES_bs_all[block].E.u[c] = c & ~0x20;
-			else
-				opencl_DES_bs_all[block].E.u[c] = c;
-#else
-			opencl_DES_bs_all[block].E.u[c] = CP_up[c];
-#endif*/
-		} else {
-			for (index = 0; index < 48; index++)
-				//opencl_DES_bs_all[block].Ens[index] =
-				  //  &opencl_DES_bs_all[block].B[opencl_DES_E[index]];
-			opencl_DES_bs_all[block].Ens[index] =
-				    &B[opencl_DES_E[index] + block * 64];
-			opencl_DES_bs_all[block].salt = 0xffffff;
+	for (index = 0; index < DES_BS_DEPTH; index++)
+		opencl_DES_bs_all[block].pxkeys[index] =
+			&opencl_DES_bs_data[block].xkeys.c[0][index & 7][index >> 3];
 
-			opencl_DES_bs_set_salt(0);
+	for (index = 0; index < 48; index++)
+		opencl_DES_bs_all[block].Ens[index] =
+			&B[opencl_DES_E[index] + block * 64];
 
-		}
-		//memset(&opencl_DES_bs_data[block].zero, 0, sizeof(opencl_DES_bs_data[block].zero));
-		//memset(&opencl_DES_bs_data[block].ones, -1, sizeof(opencl_DES_bs_data[block].ones));
-		//for (bit = 0; bit < 8; bit++)
-			//memset(&opencl_DES_bs_data[block].masks[bit], 1 << bit,
-			  //  sizeof(opencl_DES_bs_data[block].masks[bit]));
-	}
+	opencl_DES_bs_all[block].salt = 0xffffff;
+	opencl_DES_bs_set_salt(0);
+
+
 }
 
-void opencl_DES_bs_set_key(char *key, int index)
-{
-	unsigned char *dst;
-	unsigned int sector,key_index;
-	unsigned int flag=key[0];
-	init_t();
-	sector = index >> DES_BS_LOG2;
-	key_index = index & (DES_BS_DEPTH - 1);
-	dst = opencl_DES_bs_all[sector].pxkeys[key_index];
 
-	opencl_DES_bs_data[sector].keys_changed = 1;
-
-	dst[0] = 				(!flag) ? 0 : key[0];
-	dst[sizeof(DES_bs_vector) * 8]      =	(!flag) ? 0 : key[1];
-	flag = flag&&key[1] ;
-	dst[sizeof(DES_bs_vector) * 8 * 2]  =	(!flag) ? 0 : key[2];
-	flag = flag&&key[2];
-	dst[sizeof(DES_bs_vector) * 8 * 3]  =	(!flag) ? 0 : key[3];
-	flag = flag&&key[3];
-	dst[sizeof(DES_bs_vector) * 8 * 4]  =	(!flag) ? 0 : key[4];
-	flag = flag&&key[4]&&key[5];
-	dst[sizeof(DES_bs_vector) * 8 * 5]  =	(!flag) ? 0 : key[5];
-	flag = flag&&key[6];
-	dst[sizeof(DES_bs_vector) * 8 * 6]  =	(!flag) ? 0 : key[6];
-	dst[sizeof(DES_bs_vector) * 8 * 7]  =	(!flag) ? 0 : key[7];
-/*
-	if (!key[0]) goto fill8;
-	*dst = key[0];
-	*(dst + sizeof(DES_bs_vector) * 8) = key[1];
-	*(dst + sizeof(DES_bs_vector) * 8 * 2) = key[2];
-	if (!key[1]) goto fill6;
-	if (!key[2]) goto fill5;
-	*(dst + sizeof(DES_bs_vector) * 8 * 3) = key[3];
-	*(dst + sizeof(DES_bs_vector) * 8 * 4) = key[4];
-	if (!key[3]) goto fill4;
-	if (!key[4] || !key[5]) goto fill3;
-	*(dst + sizeof(DES_bs_vector) * 8 * 5) = key[5];
-	if (!key[6]) goto fill2;
-	*(dst + sizeof(DES_bs_vector) * 8 * 6) = key[6];
-	*(dst + sizeof(DES_bs_vector) * 8 * 7) = key[7];
-	return;
-fill8:
-	dst[0] = 0;
-	dst[sizeof(DES_bs_vector) * 8] = 0;
-fill6:
-	dst[sizeof(DES_bs_vector) * 8 * 2] = 0;
-fill5:
-	dst[sizeof(DES_bs_vector) * 8 * 3] = 0;
-fill4:
-	dst[sizeof(DES_bs_vector) * 8 * 4] = 0;
-fill3:
-	dst[sizeof(DES_bs_vector) * 8 * 5] = 0;
-fill2:
-	dst[sizeof(DES_bs_vector) * 8 * 6] = 0;
-	dst[sizeof(DES_bs_vector) * 8 * 7] = 0;
-	*/
-}
 /*
 void opencl_DES_bs_set_key_LM(char *key, int index)
 {
