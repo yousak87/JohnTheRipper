@@ -1,17 +1,11 @@
 /*
  * This file is part of John the Ripper password cracker,
  * Copyright (c) 2013 by Solar Designer
+ * Copyright (c) 2013 Sayantan Datta <std2048 at gmail dot com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted.
  *
- * There's ABSOLUTELY NO WARRANTY, express or implied.
- */
-
-/*
- * This software is Copyright (c) 2013 Sayantan Datta <std2048 at gmail dot com>
- * and it is hereby released to the general public under the following terms:
- * Redistribution and use in source and binary forms, with or without modification, are permitted.
  * There's ABSOLUTELY NO WARRANTY, express or implied.
  */
 
@@ -35,9 +29,9 @@ static struct mask_context msk_ctx;
 unsigned char *mask_offset_buffer;
 
   /* calculates nCr combinations */
-void combinationUtil(void *arr, int data[], int start, int end, int index, int r, int target, int *isOptimal);
+void combination_util(void *arr, int data[], int start, int end, int index, int r, int target, int *isOptimal);
 
-int checkRange(struct mask_context *ctx, int rangePos) {
+int check_range(struct mask_context *ctx, int rangePos) {
 	unsigned char start = ctx -> ranges[rangePos].chars[0];
 	int i;
 
@@ -72,25 +66,25 @@ int checkRange(struct mask_context *ctx, int rangePos) {
 	return 0;
 }
 
-int checkSelectRanges(struct mask_context *ctx, int *data, int r) {
+int check_select_ranges(struct mask_context *ctx, int *data, int r) {
 	int i, flag = 1;
 	for (i = 0; i < r; i++)
-	    flag &= checkRange(ctx, data[i]);
+	    flag &= check_range(ctx, data[i]);
 	return flag;
 }
 
-void calcCombination(void *arr, int n, int target)
+void calc_combination(void *arr, int n, int target)
 {
     int data[n], isOptimal = 0x7fffffff, i;
     ((struct mask_context*)arr) -> count = 0x7fffffff;
 
     /* Fix the maximum number of ranges that can be calculated on GPU to 3 */
     for(i = 1; i<= MAX_GPU_RANGES; i++)
-		combinationUtil(arr, data, 0, n-1, 0, i, target, &isOptimal);
+		combination_util(arr, data, 0, n-1, 0, i, target, &isOptimal);
 
 }
 
-void combinationUtil(void *arr, int data[], int start, int end, int index, int r, int target, int *isOptimal) {
+void combination_util(void *arr, int data[], int start, int end, int index, int r, int target, int *isOptimal) {
 	int i;
 
 	if (index == r)	{
@@ -102,7 +96,7 @@ void combinationUtil(void *arr, int data[], int start, int end, int index, int r
 
 		if (tmp <= *isOptimal) {
 			if ((r < ((struct mask_context*)arr) -> count) || (tmp < *isOptimal)) {
-				if(!checkSelectRanges(((struct mask_context*)arr), data, r)) return;
+				if(!check_select_ranges(((struct mask_context*)arr), data, r)) return;
 				((struct mask_context*)arr) -> count = r;
 				for ( j = 0; j < r; j++)
 					((struct mask_context*)arr) -> activeRangePos[j] = data[j];
@@ -114,7 +108,7 @@ void combinationUtil(void *arr, int data[], int start, int end, int index, int r
 
 	for (i = start; i <= end && end-i+1 >= r-index; i++) {
 		data[index] = ((struct mask_context*)arr) -> ranges[i].pos ;
-		combinationUtil(arr, data, i+1, end, index+1, r, target, isOptimal);
+		combination_util(arr, data, i+1, end, index+1, r, target, isOptimal);
 	}
 }
 
@@ -128,7 +122,7 @@ static void set_mask(struct rpp_context *rpp_ctx, struct db_main *db, unsigned c
 		msk_ctx.ranges[i].pos = rpp_ctx->ranges[i].pos - rpp_ctx->output;
 	}
 
-	calcCombination(&msk_ctx, rpp_ctx -> count, db -> max_int_keys);
+	calc_combination(&msk_ctx, rpp_ctx -> count, db -> max_int_keys);
 	msk_ctx.flg_wrd = flg_wrd;
 	memcpy(db ->msk_ctx, &msk_ctx, sizeof(struct mask_context));
 #if MASK_DEBUG

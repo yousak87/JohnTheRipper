@@ -12,9 +12,9 @@
 #define MAX_GPU_CHARS		64
 #define MAX_GPU_RANGES		3
 
-  /* Range of charcters for a placeholder in the mask */
+  /* Range of characters for a placeholder in the mask */
 struct mask_range {
-  /* Charchters in the range */
+  /* Characters in the range */
 	unsigned char chars[0x100];
 
   /* Set to zero when the characters in the range are not consecutive,
@@ -22,16 +22,16 @@ struct mask_range {
    * value cannot be a null character which has a value zero.*/
   	unsigned char start;
 
-  /* Number of charchters in the range */
+  /* Number of characters in the range */
 	int count;
 
-  /* Postion of the charcters in mask */
+  /* Postion of the characters in mask */
 	int pos;
 };
 
   /* Simplified mask structure for processing the mask inside a format for password generation */
 struct mask_context {
-  /* Set of mask pacholders selected for processing inside the format */
+  /* Set of mask placeholders selected for processing inside the format */
 	struct mask_range ranges[MASK_RANGES_MAX];
 
   /* Positions in mask for overwriting in the format */
