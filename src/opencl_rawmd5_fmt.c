@@ -727,6 +727,10 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		load_hash(salt);
 		load_bitmap(loaded_count, 0, &bitmap.bitmap0[0], (BITMAP_SIZE_1 / 8));
 		load_bitmap(loaded_count, 1, &bitmap.bitmap1[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 2, &bitmap.bitmap2[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 3, &bitmap.bitmap3[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 0, &bitmap.gbitmap0[0], (BITMAP_SIZE_0 / 8));
+		//load_bitmap(loaded_count, 1, &bitmap.gbitmap1[0], (BITMAP_SIZE_0 / 8));
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap, CL_TRUE, 0, sizeof(struct bitmap_ctx), &bitmap, 0, NULL, NULL ), "Failed Copy data to gpu");
 	}
 	// copy keys to the device
