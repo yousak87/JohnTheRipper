@@ -156,27 +156,26 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 	  uint ctr) {
 
 	uint i, j, loaded_hash, tmp;
-	uint num_keys = get_global_size(0);
 
 	hash[0].s0 += 0x67452301;
 	hash[0].s1 += 0xefcdab89;
 	hash[0].s2 += 0x98badcfe;
 	hash[0].s3 += 0x10325476;
 
-	for(i = 0; i < num_loaded_hashes; i++) {
+	loaded_hash = hash[0].s0 & BITMAP_HASH_1;
+	tmp = (bitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
+	if(tmp) {
 
-		loaded_hash = hash[0].s0 & BITMAP_HASH_1;
-		tmp = (bitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
+		loaded_hash = hash[0].s1 & BITMAP_HASH_1;
+		tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
 		if(tmp) {
 
-			loaded_hash = hash[0].s1 & BITMAP_HASH_1;
-			tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
-			if(tmp) {
+			for(i = 0; i < num_loaded_hashes; i++) {
 
-				loaded_hash = loaded_hashes[i * 4 + 3];
+				loaded_hash = loaded_hashes[i + 2 * num_loaded_hashes + 1];
 				if(hash[0].s2 == loaded_hash) {
 
-					loaded_hash = loaded_hashes[i * 4 + 4];
+					loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
 					if(hash[0].s3 == loaded_hash) {
 
 						hashes[i] = hash[0].s0;

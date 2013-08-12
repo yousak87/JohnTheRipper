@@ -408,10 +408,10 @@ static void load_hash(struct db_salt *salt) {
 		bin = (unsigned int *)pw -> binary;
 		// Potential segfault if removed
 		if(bin != NULL) {
-			loaded_hashes[i*4 + 1] = bin[0];
-			loaded_hashes[i*4 + 2] = bin[1];
-			loaded_hashes[i*4 + 3] = bin[2];
-			loaded_hashes[i*4 + 4] = bin[3];
+			loaded_hashes[i + 1] = bin[0];
+			loaded_hashes[i + loaded_count + 1] = bin[1];
+			loaded_hashes[i + 2 * loaded_count + 1] = bin[2];
+			loaded_hashes[i + 3 * loaded_count + 1] = bin[3];
 			i++ ;
 		}
 	} while ((pw = pw -> next)) ;
@@ -429,7 +429,7 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int index, unsi
 	memset(bitmap, 0, szBmp);
 
 	for(i = 0; i < num_loaded_hashes; i++) {
-		hash = loaded_hashes[index + i * 4 + 1] & (szBmp * 8 - 1);
+		hash = loaded_hashes[index * num_loaded_hashes + i + 1] & (szBmp * 8 - 1);
 		// divide by 32 , harcoded here and correct only for unsigned int
 		bitmap[hash >> 5] |= (1U << (hash & 31));
 	}
@@ -633,7 +633,7 @@ static char *get_key(int index)
 {
 	static char out[PLAINTEXT_LENGTH + 1];
 	int i;
-	int  len, ctr = 0, mask_offset = 0;
+	int  len, ctr = 0, mask_offset = 0, flag = 0;
 	char *key;
 
 	if((index < loaded_count) && cmp_out) {
@@ -644,6 +644,7 @@ static char *get_key(int index)
 		 */
 		index = outKeyIdx[index] & 0x7fffffff;
 		mask_offset = mask_offsets[index];
+		flag = 1;
 	}
 	len = saved_idx[index] & 63;
 	key = (char*)&saved_plain[saved_idx[index] >> 6];
@@ -651,7 +652,7 @@ static char *get_key(int index)
 	for (i = 0; i < len; i++)
 		out[i] = *key++;
 
-	if(cmp_out && mask_mode)
+	if(cmp_out && mask_mode && flag)
 		passgen(ctr, mask_offset, out);
 
 	out[i] = 0;
