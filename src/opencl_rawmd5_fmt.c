@@ -38,6 +38,8 @@
 #define FORMAT_TAG          "$dynamic_0$"
 #define TAG_LENGTH          (sizeof(FORMAT_TAG) - 1)
 
+#define RAWMD5_DEBUG 0
+
 cl_mem pinned_saved_keys, pinned_saved_idx, pinned_partial_hashes;
 cl_mem buffer_keys, buffer_idx, buffer_out;
 static unsigned int *saved_plain, *saved_idx;
@@ -493,7 +495,6 @@ static void check_mask_rawmd5(struct mask_context *msk_ctx) {
 }
 
 static void load_mask(struct db_main *db) {
-	int i, j;
 
 	if (!db->msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
@@ -501,7 +502,8 @@ static void load_mask(struct db_main *db) {
 	}
 	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
 	check_mask_rawmd5(&msk_ctx);
-
+#if RAWMD5_DEBUG
+	int i, j;
 	for(i = 0; i < MASK_RANGES_MAX; i++)
 	    printf("%d ",msk_ctx.activeRangePos[i]);
 	printf("\n");
@@ -520,7 +522,7 @@ static void load_mask(struct db_main *db) {
 			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
 			printf("\n");
 	}
-
+#endif
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
 
@@ -710,9 +712,14 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)
 			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+#if RAWMD5_DEBUG
 		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
+#endif
 		flag = 1;
 	}
+
+	if(mask_mode)
+		*pcount *= multiplier;
 
 
 	if(loaded_count != (salt->count)) {
