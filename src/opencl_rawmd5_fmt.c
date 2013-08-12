@@ -1,4 +1,4 @@
-/*
+ /*
  * MD5 OpenCL code is based on Alain Espinosa's OpenCL patches.
  *
  * This software is Copyright (c) 2010, Dhiru Kholia <dhiru.kholia at gmail.com>
@@ -19,6 +19,8 @@
 #include "common-opencl.h"
 #include "config.h"
 #include "options.h"
+#include "loader.h"
+#include "opencl_rawmd5_fmt.h"
 
 #define PLAINTEXT_LENGTH    55 /* Max. is 55 with current kernel, Warning: key length is hardcoded in md5_kernel struct return_key */
 #define BUFSIZE             ((PLAINTEXT_LENGTH+3)/4*4)
@@ -29,35 +31,42 @@
 #define BENCHMARK_LENGTH    -1
 #define CIPHERTEXT_LENGTH   32
 #define DIGEST_SIZE         16
-#define BINARY_SIZE         4
+#define BINARY_SIZE         16
 #define BINARY_ALIGN        4
 #define SALT_SIZE           0
 #define SALT_ALIGN          1
-
 #define FORMAT_TAG          "$dynamic_0$"
 #define TAG_LENGTH          (sizeof(FORMAT_TAG) - 1)
 
-struct return_key {
-	char key[PLAINTEXT_LENGTH + 5];
-	unsigned int length;
-};
-
 cl_mem pinned_saved_keys, pinned_saved_idx, pinned_partial_hashes;
-cl_mem buffer_keys, buffer_idx, buffer_out, buffer_ld_hashes, buffer_cmp_out, buffer_return_keys;
-cl_kernel crk_kernel;
+cl_mem buffer_keys, buffer_idx, buffer_out;
+static unsigned int *saved_plain, *saved_idx;
 static cl_uint *partial_hashes;
 static cl_uint *res_hashes ;
-static unsigned int *saved_plain, *saved_idx, *loaded_hashes, *cmp_out;
-static int benchmark = 1; // used as a flag
+
+cl_mem buffer_ld_hashes, buffer_outKeyIdx, buffer_mask_gpu;
+static unsigned int *loaded_hashes, cmp_out, *outKeyIdx;
+static struct mask_context msk_ctx;
+
+static unsigned char *mask_offsets;
+
+cl_kernel crk_kernel_nnn, crk_kernel_ccc, crk_kernel_cnn, crk_kernel_om, crk_kernel;
+
+static int self_test = 1; // used as a flag
 static unsigned int key_idx = 0;
+static unsigned int mask_mode = 0;
 static int loaded_count;
-static struct return_key *return_keys;
+
+static struct db_main *DB;
+
+static struct bitmap_ctx bitmap;
+cl_mem buffer_bitmap;
 
 #define MIN(a, b)               (((a) > (b)) ? (b) : (a))
 #define MAX(a, b)               (((a) > (b)) ? (a) : (b))
 
 #define MIN_KEYS_PER_CRYPT      1024
-#define MAX_KEYS_PER_CRYPT      (1024 * 2048)
+#define MAX_KEYS_PER_CRYPT      (1024 * 2048 )
 
 #define CONFIG_NAME             "rawmd5"
 #define STEP                    65536
@@ -69,7 +78,7 @@ static const char * warn[] = {
 };
 
 extern void common_find_best_lws(size_t group_size_limit,
-        int sequential_id, cl_kernel crypt_kernel);
+        unsigned int sequential_id, cl_kernel crypt_kernel);
 extern void common_find_best_gws(int sequential_id, unsigned int rounds, int step,
         unsigned long long int max_run_time);
 
@@ -122,10 +131,6 @@ static void create_clobj(int kpc, struct fmt_main * self)
 	HANDLE_CLERROR(clSetKernelArg(crypt_kernel, 1, sizeof(buffer_idx), (void *) &buffer_idx), "Error setting argument 2");
 	HANDLE_CLERROR(clSetKernelArg(crypt_kernel, 2, sizeof(buffer_out), (void *) &buffer_out), "Error setting argument 3");
 
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, 0, sizeof(buffer_keys), (void *) &buffer_keys), "Error setting argument 1");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, 1, sizeof(buffer_idx), (void *) &buffer_idx), "Error setting argument 2");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, 2, sizeof(buffer_out), (void *) &buffer_out), "Error setting argument 3");
-
 	global_work_size = kpc;
 }
 
@@ -140,29 +145,28 @@ static void release_clobj(void)
 	HANDLE_CLERROR(clReleaseMemObject(buffer_out), "Error Releasing buffer_out");
 	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_keys), "Error Releasing pinned_saved_keys");
 	HANDLE_CLERROR(clReleaseMemObject(pinned_partial_hashes), "Error Releasing pinned_partial_hashes");
-
 	MEM_FREE(res_hashes);
 }
 
 static void done(void)
 {
 	release_clobj();
-
-	if (buffer_cmp_out)
-		HANDLE_CLERROR(clReleaseMemObject(buffer_cmp_out), "Error Releasing cmp_out");
-
-	if (buffer_ld_hashes)
+	if(!self_test) {
+		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), "Error Releasing cmp_out");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_ld_hashes), "Error Releasing loaded hashes");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap), "Error Releasing loaded hashes");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Error Releasing loaded hashes");
 
-	if (buffer_return_keys)
-		HANDLE_CLERROR(clReleaseMemObject(buffer_return_keys), "Error Releasing return keys");
-
-	MEM_FREE(cmp_out);
-	MEM_FREE(loaded_hashes);
-	MEM_FREE(return_keys);
+		MEM_FREE(outKeyIdx);
+		MEM_FREE(loaded_hashes);
+		MEM_FREE(mask_offsets);
+	}
 
 	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release self_test kernel");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel), "Release cracking kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_nnn), "Release cracking kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_ccc), "Release cracking kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_cnn), "Release cracking kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release cracking kernel");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 }
 
@@ -205,7 +209,16 @@ static void init(struct fmt_main *self)
 	crypt_kernel = clCreateKernel(program[ocl_gpu_id], "md5_self_test", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
-	crk_kernel = clCreateKernel(program[ocl_gpu_id], "md5", &ret_code);
+	crk_kernel_om = clCreateKernel(program[ocl_gpu_id], "md5_om", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+
+	crk_kernel_nnn = clCreateKernel(program[ocl_gpu_id], "md5_nnn", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+
+	crk_kernel_ccc = clCreateKernel(program[ocl_gpu_id], "md5_ccc", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+
+	crk_kernel_cnn = clCreateKernel(program[ocl_gpu_id], "md5_cnn", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
 	local_work_size = global_work_size = 0;
@@ -236,11 +249,18 @@ static void init(struct fmt_main *self)
 	while (global_work_size > MIN((1<<26)*4/56, max_mem / BUFSIZE))
 		global_work_size -= local_work_size;
 
+	global_work_size = MAX_KEYS_PER_CRYPT;
+	local_work_size = LWS;
+
 	if (global_work_size)
 		create_clobj(global_work_size, self);
 	else {
 		find_best_gws(self, ocl_gpu_id);
 	}
+
+	if(options.mask)
+		mask_mode = 1;
+
 	if (options.verbosity > 2)
 		fprintf(stderr,
 		        "Local worksize (LWS) %zd, global worksize (GWS) %zd\n",
@@ -307,31 +327,254 @@ static void clear_keys(void)
 	key_idx = 0;
 }
 
-static void opencl_md5_reset(struct db_main *db)
-{
-	if (db) {
-		loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) + 1)*sizeof(unsigned int));
-		cmp_out	      = (unsigned int*)mem_alloc((db->password_count) *sizeof(unsigned int));
-		return_keys   = (struct return_key*)mem_alloc((db->password_count) *sizeof(struct return_key));
+static void setKernelArgs(cl_kernel *kernel) {
+	int argIdx = 0;
 
-		buffer_ld_hashes = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, ((db->password_count) + 1)*sizeof(int), NULL, &ret_code);
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIdx++, sizeof(buffer_keys), &buffer_keys), "Error setting argument 1");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIdx++, sizeof(buffer_idx), &buffer_idx), "Error setting argument 2");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIdx++, sizeof(buffer_out), &buffer_out), "Error setting argument 3");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIdx++, sizeof(buffer_ld_hashes), &buffer_ld_hashes), "Error setting argument 4");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIdx++, sizeof(buffer_outKeyIdx), &buffer_outKeyIdx), "Error setting argument 5");
+	if(mask_mode)
+		HANDLE_CLERROR(clSetKernelArg(*kernel, argIdx++, sizeof(buffer_mask_gpu), &buffer_mask_gpu), "Error setting argument 7");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIdx++, sizeof(buffer_bitmap), &buffer_bitmap), "Error setting argument 8");
+}
+
+static void opencl_md5_reset(struct db_main *db) {
+
+
+	if(db) {
+		unsigned int length = 0;
+
+		db -> format -> params.max_keys_per_crypt = global_work_size;
+		db -> format -> params.min_keys_per_crypt = global_work_size;
+
+		loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) * 4 + 1)*sizeof(unsigned int));
+		outKeyIdx     = (unsigned int*)mem_alloc((db->password_count) * sizeof(unsigned int) * 2);
+		mask_offsets  = (unsigned char*) mem_calloc(db->format->params.max_keys_per_crypt);
+
+		buffer_ld_hashes = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, ((db->password_count) * 4 + 1)*sizeof(int), NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
 
-		buffer_cmp_out = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, (db->password_count) *sizeof(unsigned int), NULL, &ret_code);
+		buffer_bitmap = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_ctx), NULL, &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
+
+		length = ((db->format->params.max_keys_per_crypt) > ((db->password_count) * sizeof(unsigned int) * 2)) ?
+			  (db->format->params.max_keys_per_crypt) : ((db->password_count) * sizeof(unsigned int) * 2);
+		/* buffer_outKeyIdx is multiplexed for use as mask_offset input and keyIdx output */
+		buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, length, NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer cmp_out\n");
 
-		buffer_return_keys = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, (db->password_count) *sizeof(struct return_key), NULL, &ret_code);
-		HANDLE_CLERROR(ret_code, "Error creating buffer cmp_out\n");
+		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
 
-		HANDLE_CLERROR(clSetKernelArg(crk_kernel, 3, sizeof(buffer_ld_hashes), &buffer_ld_hashes), "Error setting argument 4");
-		HANDLE_CLERROR(clSetKernelArg(crk_kernel, 4, sizeof(buffer_cmp_out), &buffer_cmp_out), "Error setting argument 5");
-		HANDLE_CLERROR(clSetKernelArg(crk_kernel, 5, sizeof(buffer_return_keys), &buffer_return_keys), "Error setting argument 6");
+		self_test = 0;
 
-		benchmark = 0;
+		if (mask_mode) {
+			setKernelArgs(&crk_kernel_nnn);
+			setKernelArgs(&crk_kernel_ccc);
+			setKernelArgs(&crk_kernel_cnn);
 
-		db->max_int_keys = 0;
+			db -> max_int_keys = 26 * 26 * 10;
+
+			DB = db;
+
+			crk_kernel = crk_kernel_nnn;
+		}
+
+		else {
+			setKernelArgs(&crk_kernel_om);
+			crk_kernel = crk_kernel_om;
+		}
+
 		db->format->methods.crypt_all = crypt_all;
 		db->format->methods.get_key = get_key;
+
+	}
+}
+
+static void load_hash(struct db_salt *salt) {
+
+	unsigned int *bin, i;
+	struct db_password *pw;
+
+	loaded_count = (salt->count);
+	loaded_hashes[0] = loaded_count;
+	pw = salt -> list;
+	i = 0;
+	do {
+		bin = (unsigned int *)pw -> binary;
+		// Potential segfault if removed
+		if(bin != NULL) {
+			loaded_hashes[i*4 + 1] = bin[0];
+			loaded_hashes[i*4 + 2] = bin[1];
+			loaded_hashes[i*4 + 3] = bin[2];
+			loaded_hashes[i*4 + 4] = bin[3];
+			i++ ;
+		}
+	} while ((pw = pw -> next)) ;
+
+	if(i != (salt->count)) {
+		fprintf(stderr, "Something went wrong while loading hashes to gpu..Exiting..\n");
+		exit(0);
+	}
+
+	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_ld_hashes, CL_TRUE, 0, (i * 4 + 1) * sizeof(unsigned int) , loaded_hashes, 0, NULL, NULL), "failed in clEnqueueWriteBuffer loaded_hashes");
+}
+
+static void load_bitmap(unsigned int num_loaded_hashes, unsigned int index, unsigned int *bitmap, size_t szBmp) {
+	unsigned int i, hash;
+	memset(bitmap, 0, szBmp);
+
+	for(i = 0; i < num_loaded_hashes; i++) {
+		hash = loaded_hashes[index + i * 4 + 1] & (szBmp * 8 - 1);
+		// divide by 32 , harcoded here and correct only for unsigned int
+		bitmap[hash >> 5] |= (1U << (hash & 31));
+	}
+}
+
+static void check_mask_rawmd5(struct mask_context *msk_ctx) {
+	int i, j, k ;
+
+	if(msk_ctx -> count > PLAINTEXT_LENGTH) msk_ctx -> count = PLAINTEXT_LENGTH;
+	if(msk_ctx -> count > MASK_RANGES_MAX) {
+		fprintf(stderr, "MASK parameters are too small...Exiting...\n");
+		exit(EXIT_FAILURE);
+
+	}
+
+  /* Assumes msk_ctx -> activeRangePos[] is sorted. Check if any range exceeds md5 key limit */
+	for( i = 0; i < msk_ctx->count; i++)
+		if(msk_ctx -> activeRangePos[i] >= PLAINTEXT_LENGTH) {
+			msk_ctx->count = i;
+			break;
+		}
+	j = 0;
+	i = 0;
+	k = 0;
+ /* Append non-active portion to activeRangePos[] for ease of computation inside GPU */
+	while((j <= msk_ctx -> activeRangePos[k]) && (k < msk_ctx -> count)) {
+		if(j == msk_ctx -> activeRangePos[k]) {
+			k++;
+			j++;
+			continue;
+		}
+		msk_ctx -> activeRangePos[msk_ctx -> count + i] = j;
+		i++;
+		j++;
+	}
+	while ((i+msk_ctx->count) < MASK_RANGES_MAX) {
+		msk_ctx -> activeRangePos[msk_ctx -> count + i] = j;
+		i++;
+		j++;
+	}
+
+	for(i = msk_ctx->count; i < MASK_RANGES_MAX; i++)
+		msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count = 0;
+
+	/* Sort active ranges in descending order of charchter count */
+	if(msk_ctx->ranges[msk_ctx -> activeRangePos[0]].count < msk_ctx->ranges[msk_ctx -> activeRangePos[1]].count) {
+		i = msk_ctx -> activeRangePos[1];
+		msk_ctx -> activeRangePos[1] = msk_ctx -> activeRangePos[0];
+		msk_ctx -> activeRangePos[0] = i;
+	}
+
+	if(msk_ctx->ranges[msk_ctx -> activeRangePos[0]].count < msk_ctx->ranges[msk_ctx -> activeRangePos[2]].count) {
+		i = msk_ctx -> activeRangePos[2];
+		msk_ctx -> activeRangePos[2] = msk_ctx -> activeRangePos[0];
+		msk_ctx -> activeRangePos[0] = i;
+	}
+
+	if(msk_ctx->ranges[msk_ctx -> activeRangePos[1]].count < msk_ctx->ranges[msk_ctx -> activeRangePos[2]].count) {
+		i = msk_ctx -> activeRangePos[2];
+		msk_ctx -> activeRangePos[2] = msk_ctx -> activeRangePos[1];
+		msk_ctx -> activeRangePos[1] = i;
+	}
+}
+
+static void load_mask(struct db_main *db) {
+	int i, j;
+
+	if (!db->msk_ctx) {
+		fprintf(stderr, "No given mask.Exiting...\n");
+		exit(EXIT_FAILURE);
+	}
+	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
+	check_mask_rawmd5(&msk_ctx);
+
+	for(i = 0; i < MASK_RANGES_MAX; i++)
+	    printf("%d ",msk_ctx.activeRangePos[i]);
+	printf("\n");
+	for(i = 0; i < MASK_RANGES_MAX; i++)
+	    printf("%d ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].count);
+	printf("\n");
+
+	/*
+	for(i = 0; i < msk_ctx.count; i++)
+	  printf(" %d ", msk_ctx.activeRangePos[i]);*/
+	for(i = 0; i < msk_ctx.count; i++){
+			for(j = 0; j < msk_ctx.ranges[msk_ctx.activeRangePos[i]].count; j++)
+				printf("%c ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].chars[j]);
+			printf("\n");
+			//checkRange(&msk_ctx, msk_ctx.activeRangePos[i]) ;
+			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
+			printf("\n");
+	}
+
+	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
+}
+
+/* crk_kernel_ccc: optimized for kernel with all 3 ranges consecutive.
+ * crk_kernel_nnn: optimized for kernel with no consecutive ranges.
+ * crk_kernel_cnn: optimized for kernel with 1st range being consecutive and remaining ranges non-consecutive.
+ *
+ * select_kernel() assumes that the active ranges are arranged according to decreasing character count, which is taken
+ * care of inside check_mask_rawmd5().
+ *
+ * crk_kernel_ccc used for mask types: ccc, cc, c.
+ * crk_kernel_nnn used for mask types: nnn, nnc, ncn, ncc, nc, nn, n.
+ * crk_kernel_cnn used for mask types: cnn, cnc, ccn, cn.
+ */
+
+static void select_kernel(struct mask_context *msk_ctx) {
+
+	if (!(msk_ctx->ranges[msk_ctx->activeRangePos[0]].start)) {
+		crk_kernel = crk_kernel_nnn;
+		fprintf(stderr,"Using kernel md5_nnn...\n" );
+		return;
+	}
+
+	else {
+		crk_kernel = crk_kernel_ccc;
+
+		if ((msk_ctx->count) > 1) {
+			if (!(msk_ctx->ranges[msk_ctx->activeRangePos[1]].start)) {
+				crk_kernel = crk_kernel_cnn;
+				fprintf(stderr,"Using kernel md5_cnn...\n" );
+				return;
+			}
+
+			else {
+				crk_kernel = crk_kernel_ccc;
+
+				/* For type ccn */
+				if ((msk_ctx->count) == 3)
+					if (!(msk_ctx->ranges[msk_ctx->activeRangePos[2]].start))  {
+						crk_kernel = crk_kernel_cnn;
+						if ((msk_ctx->ranges[msk_ctx->activeRangePos[2]].count) > 64) {
+							fprintf(stderr,"Raw-MD5-opencl failed processing mask type ccn.\n" );
+						}
+						fprintf(stderr,"Using kernel md5_cnn...\n" );
+						return;
+					}
+
+				fprintf(stderr,"Using kernel md5_ccc...\n" );
+				return;
+			}
+		}
+
+		fprintf(stderr,"Using kernel md5_ccc...\n" );
+		return;
 	}
 }
 
@@ -348,6 +591,8 @@ static void set_key(char *_key, int index)
 	}
 	if (len)
 		saved_plain[key_idx++] = *key & (0xffffffffU >> (32 - (len << 3)));
+
+
 }
 
 static char *get_key_self_test(int index)
@@ -364,16 +609,49 @@ static char *get_key_self_test(int index)
 	return out;
 }
 
+static void passgen(int ctr, int offset, char *key) {
+	int i, j, k;
+
+	offset = msk_ctx.flg_wrd ? offset : 0;
+
+	i =  ctr % msk_ctx.ranges[msk_ctx.activeRangePos[0]].count;
+	key[msk_ctx.activeRangePos[0] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[0]].chars[i];
+
+	if (msk_ctx.ranges[msk_ctx.activeRangePos[1]].count) {
+		j = (ctr / msk_ctx.ranges[msk_ctx.activeRangePos[0]].count) % msk_ctx.ranges[msk_ctx.activeRangePos[1]].count;
+		key[msk_ctx.activeRangePos[1] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[1]].chars[j];
+	}
+	if (msk_ctx.ranges[msk_ctx.activeRangePos[2]].count) {
+		k = (ctr / (msk_ctx.ranges[msk_ctx.activeRangePos[0]].count * msk_ctx.ranges[msk_ctx.activeRangePos[1]].count)) % msk_ctx.ranges[msk_ctx.activeRangePos[2]].count;
+		key[msk_ctx.activeRangePos[2] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[2]].chars[k];
+	}
+}
+
 static char *get_key(int index)
 {
 	static char out[PLAINTEXT_LENGTH + 1];
 	int i;
+	int  len, ctr = 0, mask_offset = 0;
+	char *key;
 
-	if (index >= loaded_count) return "CHECK";
-	// Potential segfault if removed
-	index = (index < loaded_count) ? index: (loaded_count -1);
-	for (i = 0; i < return_keys[index].length; i++)
-		out[i] = return_keys[index].key[i];
+	if((index < loaded_count) && cmp_out) {
+		ctr = outKeyIdx[index + loaded_count];
+		/* outKeyIdx contains all zero when no new passwords are cracked.
+		 * Hence during status checks even if index is less than loaded count
+		 * correct range of passwords is displayed.
+		 */
+		index = outKeyIdx[index] & 0x7fffffff;
+		mask_offset = mask_offsets[index];
+	}
+	len = saved_idx[index] & 63;
+	key = (char*)&saved_plain[saved_idx[index] >> 6];
+
+	for (i = 0; i < len; i++)
+		out[i] = *key++;
+
+	if(cmp_out && mask_mode)
+		passgen(ctr, mask_offset, out);
+
 	out[i] = 0;
 
 	return out;
@@ -421,63 +699,71 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 {
 	int count = *pcount;
 	unsigned int i;
+	static unsigned int flag, multiplier;
+	cl_event evnt;
+
 	global_work_size = (count + local_work_size - 1) / local_work_size * local_work_size;
 
+	if((!flag) && mask_mode) {
+		load_mask(DB);
+		select_kernel(&msk_ctx);
+		multiplier = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
+		flag = 1;
+	}
+
+
 	if(loaded_count != (salt->count)) {
-		unsigned int *bin;
-		struct db_password *pw;
-
-		loaded_count = (salt->count);
-		loaded_hashes[0] = loaded_count;
-		pw = salt -> list;
-		i = 0;
-		do {
-			bin = (unsigned int *)pw -> binary;
-			// Potential segfault if removed
-			if(bin != NULL) {
-				loaded_hashes[i + 1] = bin[0] ;
-				i++ ;
-			}
-		} while ((pw = pw -> next)) ;
-
-		if(i != (salt->count)) {
-			fprintf(stderr, "Something went wrong while loading hashes to gpu..Exiting..\n");
-			exit(0);
-		}
-
-
-
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_ld_hashes, CL_TRUE, 0, (i + 1) * sizeof(unsigned int) , loaded_hashes, 0, NULL, NULL), "failed in clEnqueueWriteBuffer loaded_hashes");
+		load_hash(salt);
+		load_bitmap(loaded_count, 0, &bitmap.bitmap0[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 1, &bitmap.bitmap1[0], (BITMAP_SIZE_1 / 8));
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap, CL_TRUE, 0, sizeof(struct bitmap_ctx), &bitmap, 0, NULL, NULL ), "Failed Copy data to gpu");
 	}
 	// copy keys to the device
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0, 4 * key_idx, saved_plain, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_keys");
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, 4 * global_work_size, saved_idx, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_idx");
 
-	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], crk_kernel, 1, NULL, &global_work_size, &local_work_size, 0, NULL, NULL), "failed in clEnqueueNDRangeKernel");
+	if(msk_ctx.flg_wrd)
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0,
+			(DB->format->params.max_keys_per_crypt), mask_offset_buffer, 0, NULL, NULL),
+			"failed in clEnqueWriteBuffer buffer_outKeyIdx");
+
+	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], crk_kernel, 1, NULL, &global_work_size, &local_work_size, 0, NULL, &evnt), "failed in clEnqueueNDRangeKernel");
+
+	HANDLE_CLERROR(clWaitForEvents(1, &evnt), "Wait for event failed");
 
 	// read back compare results
-	HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_cmp_out, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, cmp_out, 0, NULL, NULL), "failed in reading cmp data back");
+	HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, outKeyIdx, 0, NULL, NULL), "failed in reading cmp data back");
 
-	// If a positive match is found cmp_out[i] contains 0xffffffff else contains 0
-	for(i = 1; i < (loaded_count & (~cmp_out[0])); i++)
-		cmp_out[0] |= cmp_out[i];
+	cmp_out = 0;
+
+	// If a positive match is found outKeyIdx[i] contains 0xffffffff else contains 0
+	for(i = 0; i < (loaded_count & (~cmp_out)); i++)
+		cmp_out = outKeyIdx[i]?0xffffffff:0;
 
 	have_full_hashes = 0;
 
 	// If any positive match is found
-	if(cmp_out[0]) {
+	if(cmp_out) {
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, partial_hashes, 0, NULL, NULL), "failed in reading hashes back");
-		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_return_keys, CL_TRUE, 0, sizeof(struct return_key) * loaded_count, return_keys, 0, NULL, NULL), "failed in reading keys back");
+		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0, sizeof(cl_uint) * loaded_count * 2, outKeyIdx, 0, NULL, NULL), "failed in reading cmp data back");
+		HANDLE_CLERROR(clFinish(queue[ocl_gpu_id]), "cl finish failed");
+		if(msk_ctx.flg_wrd)
+			memcpy(mask_offsets, mask_offset_buffer, (DB->format->params.max_keys_per_crypt));
 		return loaded_count;
 	}
 
-	else
+	else {
+		HANDLE_CLERROR(clFinish(queue[ocl_gpu_id]), "cl finish failed");
 		return 0;
+	}
 }
 
 static int cmp_all(void *binary, int count)
 {
-	if(benchmark) {
+	if(self_test) {
 		unsigned int i;
 		unsigned int b = ((unsigned int *) binary)[0];
 
@@ -492,14 +778,14 @@ static int cmp_all(void *binary, int count)
 
 static int cmp_one(void *binary, int index)
 {
-	if(benchmark) return (((unsigned int*)binary)[0] == partial_hashes[index]);
+	if(self_test) return (((unsigned int*)binary)[0] == partial_hashes[index]);
 	else return 1;
 }
 
 static int cmp_exact(char *source, int index)
 {
 	unsigned int *t = (unsigned int *) get_binary(source);
-	unsigned int count = benchmark ? global_work_size: loaded_count;
+	unsigned int count = self_test ? global_work_size: loaded_count;
 
 	if (!have_full_hashes) {
 		clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
@@ -558,7 +844,7 @@ struct fmt_main fmt_opencl_rawMD5 = {
 		set_key,
 		get_key,
 		clear_keys,
-		crypt_all,
+		crypt_all_self_test,
 		{
 			get_hash_0,
 			get_hash_1,
