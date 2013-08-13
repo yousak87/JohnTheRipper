@@ -173,11 +173,9 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 	tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
 	loaded_hash = hash[0].s2 & BITMAP_HASH_1;
 	tmp &= (bitmap2[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
+	loaded_hash = hash[0].s3 & BITMAP_HASH_1;
+	tmp &= (bitmap3[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
 	if(tmp) {
-
-		 loaded_hash = hash[0].s3 & BITMAP_HASH_1;
-		 tmp &= (bitmap3[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
-		  if(tmp) {
 
 			loaded_hash = hash[0].s0 & BITMAP_HASH_0;
 			tmp &= (gbitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
@@ -206,7 +204,7 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 				}
 			}
 		}
-	}
+
 
  }
 __kernel void md5_self_test(__global const uint *keys, __global const uint *index, __global uint *hashes)
