@@ -153,6 +153,7 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 	  __local uint *bitmap2,
 	  __local uint *bitmap3,
 	  __global uint *gbitmap0,
+	  __global uint *gbitmap1,
 	  __private uint4 *hash,
 	  __global uint * outKeyIdx,
 	  uint num_loaded_hashes,
@@ -168,40 +169,37 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 
 	loaded_hash = hash[0].s0 & BITMAP_HASH_1;
 	tmp = (bitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
+	loaded_hash = hash[0].s1 & BITMAP_HASH_1;
+	tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
+	loaded_hash = hash[0].s2 & BITMAP_HASH_1;
+	tmp &= (bitmap2[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
 	if(tmp) {
 
-		loaded_hash = hash[0].s1 & BITMAP_HASH_1;
-		tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
-		if(tmp) {
+		 loaded_hash = hash[0].s3 & BITMAP_HASH_1;
+		 tmp &= (bitmap3[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
+		  if(tmp) {
 
-			loaded_hash = hash[0].s2 & BITMAP_HASH_1;
-			tmp &= (bitmap2[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
+			loaded_hash = hash[0].s0 & BITMAP_HASH_0;
+			tmp &= (gbitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
 			if(tmp) {
 
-				 loaded_hash = hash[0].s3 & BITMAP_HASH_1;
-				 tmp &= (bitmap3[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
-				  if(tmp) {
+				loaded_hash = hash[0].s1 & BITMAP_HASH_0;
+				tmp &= (gbitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
+				if(tmp) {
 
-					loaded_hash = hash[0].s0 & BITMAP_HASH_0;
-					tmp &= (gbitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
-					if(tmp) {
+					for(i = 0; i < num_loaded_hashes; i++) {
+						loaded_hash = loaded_hashes[i + 2 * num_loaded_hashes + 1];
+						if(hash[0].s2 == loaded_hash) {
 
-						for(i = 0; i < num_loaded_hashes; i++) {
+							loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
+							if(hash[0].s3 == loaded_hash) {
+								hashes[i] = hash[0].s0;
+								hashes[1 * num_loaded_hashes + i] = hash[0].s1;
+								hashes[2 * num_loaded_hashes + i] = hash[0].s2;
+								hashes[3 * num_loaded_hashes + i] = hash[0].s3;
 
-							loaded_hash = loaded_hashes[i + 2 * num_loaded_hashes + 1];
-							if(hash[0].s2 == loaded_hash) {
-
-								loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
-								if(hash[0].s3 == loaded_hash) {
-
-									hashes[i] = hash[0].s0;
-									hashes[1 * num_loaded_hashes + i] = hash[0].s1;
-									hashes[2 * num_loaded_hashes + i] = hash[0].s2;
-									hashes[3 * num_loaded_hashes + i] = hash[0].s3;
-
-									outKeyIdx[i] = gid | 0x80000000;
-									outKeyIdx[i + num_loaded_hashes] = ctr;
-								}
+								outKeyIdx[i] = gid | 0x80000000;
+								outKeyIdx[i + num_loaded_hashes] = ctr;
 							}
 						}
 					}
@@ -209,6 +207,7 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 			}
 		}
 	}
+
  }
 __kernel void md5_self_test(__global const uint *keys, __global const uint *index, __global uint *hashes)
 {
@@ -279,7 +278,7 @@ __kernel void md5_om(__global const uint *keys,
 		W[i] = *keys++;
 
 	raw_md5_encrypt(W, &hash, len);
-	cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap[0].gbitmap0[0], &hash, outKeyIdx, num_loaded_hashes, gid, 0);
+	cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap[0].gbitmap0[0], &bitmap[0].gbitmap1[0], &hash, outKeyIdx, num_loaded_hashes, gid, 0);
 }
 
 /* Kernels for mask mode */
@@ -362,7 +361,7 @@ __kernel void md5_nnn(__global uint *keys,
 			for (i = 0; i < rangeNumChars[0]; i++) {
 				PUTCHAR(W, activeRangePos[0], ranges[i]);
 				raw_md5_encrypt(W, &hash, len);
-				cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap[0].gbitmap0[0], &hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
+				cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap[0].gbitmap0[0], &bitmap[0].gbitmap1[0], &hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
 			}
 
 			j++;
@@ -454,7 +453,7 @@ __kernel void md5_ccc(__global uint *keys,
 			for (i = 0; i < rangeNumChars[0]; i++) {
 				PUTCHAR(W, activeRangePos[0], (start[0] + i));
 				raw_md5_encrypt(W, &hash, len);
-				cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap[0].gbitmap0[0], &hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
+				cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap[0].gbitmap0[0], &bitmap[0].gbitmap1[0], &hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
 			}
 
 			j++;
@@ -551,7 +550,7 @@ __kernel void md5_cnn(__global uint *keys,
 			for (i = 0; i < rangeNumChars[0]; i++) {
 				PUTCHAR(W, activeRangePos[0], (start + i));
 				raw_md5_encrypt(W, &hash, len);
-				cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap[0].gbitmap0[0], &hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
+				cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap[0].gbitmap0[0], &bitmap[0].gbitmap1[0], &hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
 			}
 
 			j++;
