@@ -57,6 +57,7 @@ cl_kernel crk_kernel_nnn, crk_kernel_ccc, crk_kernel_cnn, crk_kernel_om, crk_ker
 static int self_test = 1; // used as a flag
 static unsigned int key_idx = 0;
 static unsigned int mask_mode = 0;
+static unsigned int num_keys= 0;
 static int loaded_count;
 
 static struct db_main *DB;
@@ -273,7 +274,6 @@ static void init(struct fmt_main *self)
 	self->params.max_keys_per_crypt = global_work_size;
 	self->methods.crypt_all = crypt_all_self_test;
 	self->methods.get_key = get_key_self_test;
-
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -329,6 +329,7 @@ static int get_hash_6(int index) {  return partial_hashes[index] & 0x7ffffff;  }
 static void clear_keys(void)
 {
 	key_idx = 0;
+	num_keys = 0;
 }
 
 static void setKernelArgs(cl_kernel *kernel) {
@@ -441,17 +442,24 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int index, unsi
 }
 
 static void load_hashtable(unsigned int *hashtable, unsigned int *loaded_next_hash, unsigned int idx, unsigned int num_loaded_hashes) {
-	unsigned int i, counter = 0;
+	unsigned int i;
+#if RAWMD5_DEBUG
+	unsigned int counter = 0;
+#endif
 	memset(hashtable, 0xFF, HASH_TABLE_SIZE_0 * sizeof(unsigned int));
 	memset(loaded_next_hash, 0xFF, num_loaded_hashes * sizeof(unsigned int));
 
 	for (i = 0; i < num_loaded_hashes; ++i) {
 		unsigned int hash = loaded_hashes[i + idx*num_loaded_hashes + 1] & (HASH_TABLE_SIZE_0 - 1);
 		loaded_next_hash[i] = hashtable[hash];
+#if RAWMD5_DEBUG
 		if(!(hashtable[hash]^0xFFFFFFFF)) counter++;
+#endif
 		hashtable[hash] = i;
 	}
+#if RAWMD5_DEBUG
 	fprintf(stderr, "Hash Table Effectiveness:%lf%%\n", ((double)counter/(double)num_loaded_hashes)*100);
+#endif
 }
 static void check_mask_rawmd5(struct mask_context *msk_ctx) {
 	int i, j, k ;
@@ -612,6 +620,8 @@ static void set_key(char *_key, int index)
 	if (len)
 		saved_plain[key_idx++] = *key & (0xffffffffU >> (32 - (len << 3)));
 
+	num_keys++;
+
 
 }
 
@@ -664,6 +674,7 @@ static char *get_key(int index)
 		mask_offset = mask_offsets[index];
 		flag = 1;
 	}
+	index = (index > num_keys)? (num_keys?num_keys-1:0): index;
 	len = saved_idx[index] & 63;
 	key = (char*)&saved_plain[saved_idx[index] >> 6];
 
@@ -739,7 +750,6 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 	if(mask_mode)
 		*pcount *= multiplier;
-
 
 	if(loaded_count != (salt->count)) {
 		load_hash(salt);
