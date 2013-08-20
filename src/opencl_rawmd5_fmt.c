@@ -441,16 +441,16 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int index, unsi
 	}
 }
 
-static void load_hashtable(unsigned int *hashtable, unsigned int *loaded_next_hash, unsigned int idx, unsigned int num_loaded_hashes) {
+static void load_hashtable_plus(unsigned int *hashtable, unsigned int *loaded_next_hash, unsigned int idx, unsigned int num_loaded_hashes, unsigned int szHashTbl) {
 	unsigned int i;
 #if RAWMD5_DEBUG
 	unsigned int counter = 0;
 #endif
-	memset(hashtable, 0xFF, HASH_TABLE_SIZE_0 * sizeof(unsigned int));
+	memset(hashtable, 0xFF, szHashTbl * sizeof(unsigned int));
 	memset(loaded_next_hash, 0xFF, num_loaded_hashes * sizeof(unsigned int));
 
 	for (i = 0; i < num_loaded_hashes; ++i) {
-		unsigned int hash = loaded_hashes[i + idx*num_loaded_hashes + 1] & (HASH_TABLE_SIZE_0 - 1);
+		unsigned int hash = loaded_hashes[i + idx*num_loaded_hashes + 1] & (szHashTbl - 1);
 		loaded_next_hash[i] = hashtable[hash];
 #if RAWMD5_DEBUG
 		if(!(hashtable[hash]^0xFFFFFFFF)) counter++;
@@ -461,6 +461,7 @@ static void load_hashtable(unsigned int *hashtable, unsigned int *loaded_next_ha
 	fprintf(stderr, "Hash Table Effectiveness:%lf%%\n", ((double)counter/(double)num_loaded_hashes)*100);
 #endif
 }
+
 static void check_mask_rawmd5(struct mask_context *msk_ctx) {
 	int i, j, k ;
 
@@ -757,11 +758,8 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		load_bitmap(loaded_count, 1, &bitmap1.bitmap1[0], (BITMAP_SIZE_1 / 8));
 		load_bitmap(loaded_count, 2, &bitmap1.bitmap2[0], (BITMAP_SIZE_1 / 8));
 		load_bitmap(loaded_count, 3, &bitmap1.bitmap3[0], (BITMAP_SIZE_1 / 8));
-		load_bitmap(loaded_count, 0, &bitmap1.gbitmap0[0], (BITMAP_SIZE_0 / 8));
-		load_bitmap(loaded_count, 1, &bitmap1.gbitmap1[0], (BITMAP_SIZE_4 / 8));
-		load_bitmap(loaded_count, 2, &bitmap2.gbitmap0[0], (BITMAP_SIZE_0 / 8));
-		load_bitmap(loaded_count, 3, &bitmap2.gbitmap1[0], (BITMAP_SIZE_3 / 8));
-		load_hashtable(&bitmap2.hashtable[0], &bitmap1.loaded_next_hash[0], 1, loaded_count);
+		load_bitmap(loaded_count, 0, &bitmap1.gbitmap0[0], (BITMAP_SIZE_3 / 8));
+		load_hashtable_plus(&bitmap2.hashtable0[0], &bitmap1.loaded_next_hash[0], 2, loaded_count, HASH_TABLE_SIZE_0);
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap1, CL_TRUE, 0, sizeof(struct bitmap_context_mixed), &bitmap1, 0, NULL, NULL ), "Failed Copy data to gpu");
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap2, CL_TRUE, 0, sizeof(struct bitmap_context_global), &bitmap2, 0, NULL, NULL ), "Failed Copy data to gpu");
 	}
