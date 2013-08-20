@@ -196,7 +196,8 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 						i = hashtable[hash[0].s1 & (HASH_TABLE_SIZE_0 - 1)];
 						if(i ^ 0xFFFFFFFF) {
 							do {
-								if ((hash[0].s0 == loaded_hashes[i + 1]) && (hash[0].s2 == loaded_hashes[i + 2 * num_loaded_hashes + 1]) &&
+								if ((hash[0].s0 == loaded_hashes[i + 1]) && (hash[0].s1 == loaded_hashes[i + num_loaded_hashes + 1]) &&
+								    (hash[0].s2 == loaded_hashes[i + 2 * num_loaded_hashes + 1]) &&
 								    (hash[0].s3 == loaded_hashes[i + 3 * num_loaded_hashes + 1])) {
 										outKeyIdx[i] = gid | 0x80000000;
 										outKeyIdx[i + num_loaded_hashes] = ctr;

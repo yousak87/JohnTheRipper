@@ -663,7 +663,7 @@ static char *get_key(int index)
 	int i;
 	int  len, ctr = 0, mask_offset = 0, flag = 0;
 	char *key;
-
+	
 	if((index < loaded_count) && cmp_out) {
 		ctr = outKeyIdx[index + loaded_count];
 		/* outKeyIdx contains all zero when no new passwords are cracked.
@@ -788,7 +788,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		cmp_out = outKeyIdx[i]?0xffffffff:0;
 
 	have_full_hashes = 0;
-
+	
 	// If any positive match is found
 	if(cmp_out) {
 		//HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, partial_hashes, 0, NULL, NULL), "failed in reading hashes back");
@@ -827,31 +827,41 @@ static int cmp_all(void *binary, int count)
 
 static int cmp_one(void *binary, int index)
 {
-	if(self_test) return (((unsigned int*)binary)[0] == partial_hashes[index]);
-	else return 1;
+	return (((unsigned int*)binary)[0] == partial_hashes[index]);
 }
 
 static int cmp_exact(char *source, int index)
 {
 	unsigned int *t = (unsigned int *) get_binary(source);
 	unsigned int count = self_test ? global_work_size: loaded_count;
-	if(!self_test) return 1;
+	if (self_test) {
+		if (!have_full_hashes) {
+			clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
+				sizeof(cl_uint) * (count),
+				sizeof(cl_uint) * 3 * count,
+				res_hashes, 0, NULL, NULL);
+				have_full_hashes = 1;
+		}
 
-	if (!have_full_hashes) {
-		clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
-		        sizeof(cl_uint) * (count),
-		        sizeof(cl_uint) * 3 * count,
-		        res_hashes, 0, NULL, NULL);
-		have_full_hashes = 1;
+		if (t[1]!=res_hashes[index])
+			return 0;
+		if (t[2]!=res_hashes[1*count+index])
+			return 0;
+		if (t[3]!=res_hashes[2*count+index])
+			return 0;
+		return 1;
 	}
-
-	if (t[1]!=res_hashes[index])
-		return 0;
-	if (t[2]!=res_hashes[1*count+index])
-		return 0;
-	if (t[3]!=res_hashes[2*count+index])
-		return 0;
-	return 1;
+	
+	else {	
+		if(!outKeyIdx[index]) return 0;
+		if (t[1]!=loaded_hashes[index + count + 1])
+			return 0;
+		if (t[2]!=loaded_hashes[2 * count + index +1])
+			return 0;
+		if (t[3]!=loaded_hashes[3*count + index + 1])
+			return 0;
+		return 1;
+	}
 }
 
 struct fmt_main fmt_opencl_rawMD5 = {
