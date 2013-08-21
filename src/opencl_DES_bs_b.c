@@ -195,6 +195,17 @@ static void check_mask_descrypt(struct mask_context *msk_ctx) {
 	for(i = msk_ctx->count; i < 8; i++) {
 		msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count = 0;
 	}
+
+	/* Consecutive charachters in ranges that have all the charachters consective are
+	 * arranged in ascending order. This is to make password generation on host and device
+	 * match each other when consective character optimization is used*/
+	for( i = 0; i < msk_ctx->count; i++)
+		if(msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start != 0) {
+			for (j = 0; j < msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count; j++)
+				msk_ctx->ranges[msk_ctx -> activeRangePos[i]].chars[j] =
+					msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start + j;
+
+		}
 }
 
 void opencl_DES_bs_init_global_variables() {
