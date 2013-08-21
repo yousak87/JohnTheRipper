@@ -255,8 +255,8 @@ static void init(struct fmt_main *self)
 	while (global_work_size > MIN((1<<26)*4/56, max_mem / BUFSIZE))
 		global_work_size -= local_work_size;
 
-	//global_work_size = MAX_KEYS_PER_CRYPT;
-	//local_work_size = LWS;
+	global_work_size = MAX_KEYS_PER_CRYPT;
+	local_work_size = LWS;
 
 	if (global_work_size)
 		create_clobj(global_work_size, self);
