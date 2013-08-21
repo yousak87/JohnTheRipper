@@ -79,17 +79,12 @@ cl_mem buffer_bitmap1, buffer_bitmap2;
 
 static int have_full_hashes;
 
-static const char * warn[] = {
-	"pass xfer: "  ,  ", crypt: "    ,  ", result xfer: "
-};
-
 extern void common_find_best_lws(size_t group_size_limit,
         unsigned int sequential_id, cl_kernel crypt_kernel);
 extern void common_find_best_gws(int sequential_id, unsigned int rounds, int step,
         unsigned long long int max_run_time);
 
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
-static int crypt_all_benchmark(int *pcount, struct db_salt *_salt);
 static int crypt_all(int *pcount, struct db_salt *_salt);
 static char *get_key_self_test(int index);
 static char *get_key(int index);
