@@ -463,6 +463,17 @@ static void check_mask_rawmd5(struct mask_context *msk_ctx) {
 		msk_ctx -> activeRangePos[2] = msk_ctx -> activeRangePos[1];
 		msk_ctx -> activeRangePos[1] = i;
 	}
+	/* Consecutive charchters in ranges that have all the charchters consective are
+	 * arranged in ascending order. This is to make password generation on host and device
+	 * match each other for md5_ccc and md5_cnn kernels*/
+	for( i = 0; i < msk_ctx->count; i++)
+		if(msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start != 0) {
+			for (j = 0; j < msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count; j++)
+				msk_ctx->ranges[msk_ctx -> activeRangePos[i]].chars[j] =
+					msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start + j;
+
+		}
+
 }
 
 static void load_mask(struct db_main *db) {
