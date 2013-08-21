@@ -10,6 +10,7 @@
  */
 
 #include <string.h>
+#include <math.h>
 
 #include "arch.h"
 #include "params.h"
@@ -71,7 +72,7 @@ cl_mem buffer_bitmap1, buffer_bitmap2;
 #define MAX(a, b)               (((a) > (b)) ? (a) : (b))
 
 #define MIN_KEYS_PER_CRYPT      1024
-#define MAX_KEYS_PER_CRYPT      (1024 * 2048 * 2)
+#define MAX_KEYS_PER_CRYPT      (1024 * 2048 * 4)
 
 #define CONFIG_NAME             "rawmd5"
 #define STEP                    65536
@@ -176,41 +177,8 @@ static void done(void)
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 }
 
-/* ------- Try to find the best configuration ------- */
-/* --
-   This function could be used to calculated the best num
-   for the workgroup
-   Work-items that make up a work-group (also referred to
-   as the size of the work-group)
-   -- */
-static void find_best_lws(struct fmt_main * self, int sequential_id) {
-
-	// Call the default function.
-	common_find_best_lws(
-		get_current_work_group_size(ocl_gpu_id, crypt_kernel),
-		sequential_id, crypt_kernel
-		);
-}
-
-/* --
-   This function could be used to calculated the best num
-   of keys per crypt for the given format
-   -- */
-static void find_best_gws(struct fmt_main * self, int sequential_id) {
-
-	// Call the common function.
-	common_find_best_gws(
-		sequential_id, 1, 0,
-		(cpu(device_info[ocl_gpu_id]) ? 500000000ULL : 1000000000ULL)
-		);
-
-	create_clobj(global_work_size, self);
-}
-
 static void init(struct fmt_main *self)
 {
-	size_t selected_gws, max_mem;
-
 	opencl_init("$JOHN/kernels/md5_kernel.cl", ocl_gpu_id, NULL);
 	crypt_kernel = clCreateKernel(program[ocl_gpu_id], "md5_self_test", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
@@ -230,42 +198,21 @@ static void init(struct fmt_main *self)
 	local_work_size = global_work_size = 0;
 	opencl_get_user_preferences(CONFIG_NAME);
 
-	// Initialize openCL tuning (library) for this format.
-	opencl_init_auto_setup(STEP, 0, 3, NULL, warn,
-	        &multi_profilingEvent[1], self, create_clobj,
-	        release_clobj, BUFSIZE, 0);
-	self->methods.crypt_all = crypt_all_benchmark;
+	/* Round off to nearest power of 2 */
+	if(local_work_size)
+		local_work_size = pow(2, ceil(log(local_work_size)/log(2)));
+	if(!global_work_size)
+		global_work_size = MAX_KEYS_PER_CRYPT;
+	if(!local_work_size)
+		local_work_size = LWS;
 
-	self->params.max_keys_per_crypt = (global_work_size ?
-	        global_work_size : MAX_KEYS_PER_CRYPT);
-	selected_gws = global_work_size;
-
-	if (!local_work_size) {
-		create_clobj(self->params.max_keys_per_crypt, self);
-		find_best_lws(self, ocl_gpu_id);
-		release_clobj();
-	}
-	global_work_size = selected_gws;
-
-	// Obey device limits
-	if (local_work_size > get_current_work_group_size(ocl_gpu_id, crypt_kernel))
-		local_work_size = get_current_work_group_size(ocl_gpu_id, crypt_kernel);
-	clGetDeviceInfo(devices[ocl_gpu_id], CL_DEVICE_MAX_MEM_ALLOC_SIZE,
-	        sizeof(max_mem), &max_mem, NULL);
-	while (global_work_size > MIN((1<<26)*4/56, max_mem / BUFSIZE))
-		global_work_size -= local_work_size;
-
-	global_work_size = MAX_KEYS_PER_CRYPT;
-	local_work_size = LWS;
-
-	if (global_work_size)
-		create_clobj(global_work_size, self);
-	else {
-		find_best_gws(self, ocl_gpu_id);
-	}
-
-	if(options.mask)
+	if(options.mask) {
 		mask_mode = 1;
+		local_work_size = LWS;
+		global_work_size /= 2;
+	}
+
+	create_clobj((global_work_size + local_work_size - 1) / local_work_size * local_work_size , self);
 
 	if (options.verbosity > 2)
 		fprintf(stderr,
@@ -380,6 +327,7 @@ static void opencl_md5_reset(struct db_main *db) {
 		self_test = 0;
 
 		if (mask_mode) {
+
 			setKernelArgs(&crk_kernel_nnn);
 			setKernelArgs(&crk_kernel_ccc);
 			setKernelArgs(&crk_kernel_cnn);
@@ -690,25 +638,6 @@ static char *get_key(int index)
 	out[i] = 0;
 
 	return out;
-}
-
-static int crypt_all_benchmark(int *pcount, struct db_salt *salt)
-{
-	int count = *pcount;
-
-	global_work_size = (count + local_work_size - 1) / local_work_size * local_work_size;
-
-	// copy keys to the device
-	BENCH_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0, 4 * key_idx, saved_plain, 0, NULL, &multi_profilingEvent[0]), "failed in clEnqueueWriteBuffer buffer_keys");
-	BENCH_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, sizeof(uint64_t) * global_work_size, saved_idx, 0, NULL, &multi_profilingEvent[0]), "failed in clEnqueueWriteBuffer buffer_idx");
-
-	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], crypt_kernel, 1, NULL, &global_work_size, &local_work_size, 0, NULL, &multi_profilingEvent[1]), "failed in clEnqueueNDRangeKernel");
-
-	// read back partial hashes
-	BENCH_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * global_work_size, partial_hashes, 0, NULL, &multi_profilingEvent[2]), "failed in reading data back");
-	have_full_hashes = 0;
-
-	return count;
 }
 
 static int crypt_all_self_test(int *pcount, struct db_salt *salt)
