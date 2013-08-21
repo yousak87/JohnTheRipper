@@ -151,7 +151,7 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 	  uint gid,
 	  uint ctr) {
 
-	uint i, j, loaded_hash, tmp;
+	uint i, loaded_hash, tmp;
 
 	hash[0].s0 += 0x67452301;
 	hash[0].s1 += 0xefcdab89;
