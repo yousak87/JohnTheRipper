@@ -188,12 +188,12 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 	}
 
 }
-__kernel void md5_self_test(__global const uint *keys, __global const uint *index, __global uint *hashes)
+__kernel void md5_self_test(__global const uint *keys, __global const ulong *index, __global uint *hashes)
 {
 	uint4 hash;
 	uint num_keys = get_global_size(0);
 	uint gid = get_global_id(0);
-	uint base = index[gid];
+	ulong base = index[gid];
 	uint len = base & 63, i;
 	uint W[16] = { 0 };
 
@@ -215,7 +215,7 @@ __kernel void md5_self_test(__global const uint *keys, __global const uint *inde
 
 /* For other modes except mask mode*/
 __kernel void md5_om(__global const uint *keys,
-			    __global const uint *index,
+			    __global const ulong *index,
 			    __global const uint* loaded_hashes,
 			    __global uint *outKeyIdx,
 			    __global struct bitmap_context_mixed *bitmap1,
@@ -225,7 +225,7 @@ __kernel void md5_om(__global const uint *keys,
 	uint num_keys = get_global_size(0);
 	uint lid = get_local_id(0);
 	uint gid = get_global_id(0);
-	uint base = index[gid];
+	ulong base = index[gid];
 	uint len = base & 63, i;
 	uint num_loaded_hashes = loaded_hashes[0];
 	uint W[16] = { 0 };
@@ -272,7 +272,7 @@ __kernel void md5_om(__global const uint *keys,
 
 /* Kernels for mask mode */
 __kernel void md5_nnn(__global uint *keys,
-		      __global uint *index,
+		      __global ulong *index,
 		      __global const uint* loaded_hashes,
 		      __global uint *outKeyIdx,
 		      __global struct mask_context *msk_ctx,
@@ -283,7 +283,7 @@ __kernel void md5_nnn(__global uint *keys,
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
-	uint base = index[gid];
+	ulong base = index[gid];
 	uint len = base & 63;
 	uint W[16] = { 0 };
 	uint num_loaded_hashes = loaded_hashes[0];
@@ -375,7 +375,7 @@ __kernel void md5_nnn(__global uint *keys,
 }
 
 __kernel void md5_ccc(__global uint *keys,
-		      __global uint *index,
+		      __global ulong *index,
 		      __global const uint* loaded_hashes,
 		      __global uint *outKeyIdx,
 		      __global struct mask_context *msk_ctx,
@@ -386,7 +386,7 @@ __kernel void md5_ccc(__global uint *keys,
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
-	uint base = index[gid];
+	ulong base = index[gid];
 	uint len = base & 63;
 	uint W[16] = { 0 };
 	uint num_loaded_hashes = loaded_hashes[0];
@@ -474,7 +474,7 @@ __kernel void md5_ccc(__global uint *keys,
 }
 
 __kernel void md5_cnn(__global uint *keys,
-		      __global uint *index,
+		      __global ulong *index,
 		      __global const uint* loaded_hashes,
 		      __global uint *outKeyIdx,
 		      __global struct mask_context *msk_ctx,
@@ -486,7 +486,7 @@ __kernel void md5_cnn(__global uint *keys,
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
-	uint base = index[gid];
+	ulong base = index[gid];
 	uint len = base & 63;
 	uint W[16] = { 0 };
 	uint num_loaded_hashes = loaded_hashes[0];

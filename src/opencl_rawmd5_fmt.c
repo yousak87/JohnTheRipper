@@ -42,7 +42,8 @@
 
 cl_mem pinned_saved_keys, pinned_saved_idx, pinned_partial_hashes;
 cl_mem buffer_keys, buffer_idx, buffer_out;
-static unsigned int *saved_plain, *saved_idx;
+static unsigned int *saved_plain;
+uint64_t *saved_idx;
 static cl_uint *partial_hashes;
 static cl_uint *res_hashes ;
 
@@ -55,7 +56,7 @@ static unsigned char *mask_offsets;
 cl_kernel crk_kernel_nnn, crk_kernel_ccc, crk_kernel_cnn, crk_kernel_om, crk_kernel;
 
 static int self_test = 1; // used as a flag
-static unsigned int key_idx = 0;
+static uint64_t key_idx = 0;
 static unsigned int mask_mode = 0;
 static unsigned int num_keys= 0;
 static int loaded_count;
@@ -70,7 +71,7 @@ cl_mem buffer_bitmap1, buffer_bitmap2;
 #define MAX(a, b)               (((a) > (b)) ? (a) : (b))
 
 #define MIN_KEYS_PER_CRYPT      1024
-#define MAX_KEYS_PER_CRYPT      (1024 * 2048 )
+#define MAX_KEYS_PER_CRYPT      (1024 * 2048 * 2)
 
 #define CONFIG_NAME             "rawmd5"
 #define STEP                    65536
@@ -109,9 +110,9 @@ static void create_clobj(int kpc, struct fmt_main * self)
 	saved_plain = clEnqueueMapBuffer(queue[ocl_gpu_id], pinned_saved_keys, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, BUFSIZE * kpc, 0, NULL, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error mapping page-locked memory saved_plain");
 
-	pinned_saved_idx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, 4 * kpc, NULL, &ret_code);
+	pinned_saved_idx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, sizeof(uint64_t) * kpc, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating page-locked memory pinned_saved_idx");
-	saved_idx = clEnqueueMapBuffer(queue[ocl_gpu_id], pinned_saved_idx, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, 4 * kpc, 0, NULL, NULL, &ret_code);
+	saved_idx = clEnqueueMapBuffer(queue[ocl_gpu_id], pinned_saved_idx, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, sizeof(uint64_t) * kpc, 0, NULL, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error mapping page-locked memory saved_idx");
 
 	res_hashes = malloc(sizeof(cl_uint) * 3 * kpc);
@@ -125,7 +126,7 @@ static void create_clobj(int kpc, struct fmt_main * self)
 	buffer_keys = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, BUFSIZE * kpc, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating buffer argument buffer_keys");
 
-	buffer_idx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, 4 * kpc, NULL, &ret_code);
+	buffer_idx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(uint64_t) * kpc, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating buffer argument buffer_idx");
 
 	buffer_out = clCreateBuffer(context[ocl_gpu_id], CL_MEM_WRITE_ONLY, DIGEST_SIZE * kpc, NULL, &ret_code);
@@ -254,8 +255,8 @@ static void init(struct fmt_main *self)
 	while (global_work_size > MIN((1<<26)*4/56, max_mem / BUFSIZE))
 		global_work_size -= local_work_size;
 
-	global_work_size = MAX_KEYS_PER_CRYPT;
-	local_work_size = LWS;
+	//global_work_size = MAX_KEYS_PER_CRYPT;
+	//local_work_size = LWS;
 
 	if (global_work_size)
 		create_clobj(global_work_size, self);
@@ -624,11 +625,12 @@ static void set_key(char *_key, int index)
 	num_keys++;
 
 
+
 }
 
 static char *get_key_self_test(int index)
 {
-	static char out[PLAINTEXT_LENGTH + 1];
+	static char out[PLAINTEXT_LENGTH + 20];
 	int i;
 	int  len = saved_idx[index] & 63;
 	char *key = (char*)&saved_plain[saved_idx[index] >> 6];
@@ -664,7 +666,7 @@ static char *get_key(int index)
 	int i;
 	int  len, ctr = 0, mask_offset = 0, flag = 0;
 	char *key;
-	
+
 	if((index < loaded_count) && cmp_out) {
 		ctr = outKeyIdx[index + loaded_count];
 		/* outKeyIdx contains all zero when no new passwords are cracked.
@@ -698,7 +700,7 @@ static int crypt_all_benchmark(int *pcount, struct db_salt *salt)
 
 	// copy keys to the device
 	BENCH_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0, 4 * key_idx, saved_plain, 0, NULL, &multi_profilingEvent[0]), "failed in clEnqueueWriteBuffer buffer_keys");
-	BENCH_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, 4 * global_work_size, saved_idx, 0, NULL, &multi_profilingEvent[0]), "failed in clEnqueueWriteBuffer buffer_idx");
+	BENCH_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, sizeof(uint64_t) * global_work_size, saved_idx, 0, NULL, &multi_profilingEvent[0]), "failed in clEnqueueWriteBuffer buffer_idx");
 
 	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], crypt_kernel, 1, NULL, &global_work_size, &local_work_size, 0, NULL, &multi_profilingEvent[1]), "failed in clEnqueueNDRangeKernel");
 
@@ -717,7 +719,7 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 
 	// copy keys to the device
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0, 4 * key_idx, saved_plain, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_keys");
-	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, 4 * global_work_size, saved_idx, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_idx");
+	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, sizeof(uint64_t) * global_work_size, saved_idx, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_idx");
 
 	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], crypt_kernel, 1, NULL, &global_work_size, &local_work_size, 0, NULL, NULL), "failed in clEnqueueNDRangeKernel");
 
@@ -765,7 +767,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	}
 	// copy keys to the device
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0, 4 * key_idx, saved_plain, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_keys");
-	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, 4 * global_work_size, saved_idx, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_idx");
+	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, sizeof(uint64_t) * global_work_size, saved_idx, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_idx");
 
 	if(msk_ctx.flg_wrd)
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0,
@@ -786,7 +788,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		cmp_out = outKeyIdx[i]?0xffffffff:0;
 
 	have_full_hashes = 0;
-	
+
 	// If any positive match is found
 	if(cmp_out) {
 		//HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, partial_hashes, 0, NULL, NULL), "failed in reading hashes back");
@@ -849,8 +851,8 @@ static int cmp_exact(char *source, int index)
 			return 0;
 		return 1;
 	}
-	
-	else {	
+
+	else {
 		if(!outKeyIdx[index]) return 0;
 		if (t[1]!=loaded_hashes[index + count + 1])
 			return 0;
@@ -874,7 +876,7 @@ struct fmt_main fmt_opencl_rawMD5 = {
 		BINARY_ALIGN,
 		SALT_SIZE,
 		SALT_ALIGN,
-		MIN_KEYS_PER_CRYPT,
+		MAX_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT,
 		tests
