@@ -11,6 +11,7 @@
  */
 
 #include <string.h>
+#include <math.h>
 
 #include "path.h"
 #include "arch.h"
@@ -42,11 +43,13 @@
 #define SALT_SIZE			0
 #define SALT_ALIGN			1
 
-#define MIN_KEYS_PER_CRYPT		(1024*2048*4)
+#define MIN_KEYS_PER_CRYPT		(1024*2048*8)
 #define MAX_KEYS_PER_CRYPT		MIN_KEYS_PER_CRYPT
 
 #define FORMAT_TAG			"$dynamic_26$"
 #define TAG_LENGTH			(sizeof(FORMAT_TAG) - 1)
+
+#define CONFIG_NAME			"rawsha1"
 
 #ifndef uint32_t
 #define uint32_t unsigned int
@@ -58,7 +61,7 @@ typedef struct {
 	uint32_t h0,h1,h2,h3,h4;
 } SHA_DEV_CTX;
 
-cl_command_queue queue_prof;
+//cl_command_queue queue_prof;
 
 cl_mem pinned_saved_keys, pinned_saved_idx, pinned_partial_hashes, buffer_out;
 cl_mem buffer_keys, buffer_idx;
@@ -196,7 +199,8 @@ static void done(void)
 	release_clobj();
 
 	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 }
 
@@ -204,7 +208,7 @@ static void done(void)
    this function could be used to calculated the best num
    of keys per crypt for the given format
 */
-
+/*
 static void find_best_kpc(void){
 	int num;
 	cl_event myEvent;
@@ -252,11 +256,11 @@ static void find_best_kpc(void){
 	global_work_size = optimal_kpc;
 	release_clobj();
 	create_clobj(optimal_kpc);
-}
+}*/
 
 static void fmt_rawsha1_init(struct fmt_main *self) {
-	char *temp;
-	cl_ulong maxsize;
+	//char *temp;
+	//cl_ulong maxsize;
 
 	local_work_size = global_work_size = 0;
 
@@ -271,37 +275,25 @@ static void fmt_rawsha1_init(struct fmt_main *self) {
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
 	/* Note: we ask for the kernels' max sizes, not the device's! */
-	HANDLE_CLERROR(clGetKernelWorkGroupInfo(crypt_kernel, devices[ocl_gpu_id], CL_KERNEL_WORK_GROUP_SIZE, sizeof(maxsize), &maxsize, NULL), "Query max workgroup size");
+	//HANDLE_CLERROR(clGetKernelWorkGroupInfo(crypt_kernel, devices[ocl_gpu_id], CL_KERNEL_WORK_GROUP_SIZE, sizeof(maxsize), &maxsize, NULL), "Query max workgroup size");
+	local_work_size = global_work_size = 0;
+	opencl_get_user_preferences(CONFIG_NAME);
 
-	if ((temp = getenv("LWS"))) {
-		local_work_size = atoi(temp);
-
-		while (local_work_size > maxsize)
-			local_work_size >>= 1;
-	}
-
-	if (!local_work_size) {
-		create_clobj(MAX_KEYS_PER_CRYPT);
-		opencl_find_best_workgroup(self);
-		release_clobj();
-	}
-
-	if ((temp = getenv("GWS")))
-		global_work_size = atoi(temp);
-	else
+	/* Round off to nearest power of 2 */
+	if(local_work_size)
+		local_work_size = pow(2, ceil(log(local_work_size)/log(2)));
+	if(!global_work_size)
 		global_work_size = MAX_KEYS_PER_CRYPT;
+	if(!local_work_size)
+		local_work_size = LWS;
 
-	if (!global_work_size) {
-		// User chose to die of boredom
-		global_work_size = MAX_KEYS_PER_CRYPT;
-		create_clobj(MAX_KEYS_PER_CRYPT);
-		find_best_kpc();
-	} else {
-		create_clobj(global_work_size);
-	}
-
-	if (options.mask)
+	if (options.mask) {
+		local_work_size = LWS;
+		global_work_size /= 2;
 		mask_mode = 1;
+	}
+
+	create_clobj((global_work_size + local_work_size - 1) / local_work_size * local_work_size);
 
 	if (options.verbosity > 2)
 		fprintf(stderr, "Local worksize (LWS) %d, Global worksize (GWS) %d\n",(int)local_work_size, (int)global_work_size);
@@ -342,8 +334,7 @@ static void opencl_sha1_reset(struct db_main *db) {
 
 	if(db) {
 		int length = 0;
-		// Hardcoded for cracking kernels.
-		local_work_size = LWS;
+
 		db->format->params.min_keys_per_crypt = local_work_size;
 
 		loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) * 5 + 1)*sizeof(unsigned int));
@@ -371,10 +362,6 @@ static void opencl_sha1_reset(struct db_main *db) {
 			set_kernel_args(&crk_kernel_mm);
 			crk_kernel = crk_kernel_mm;
 			db -> max_int_keys = 26 * 26 * 10;
-			if (options.verbosity > 2)
-				fprintf(stderr,
-				"New local worksize (LWS) %zd\n",
-				local_work_size);
 			DB = db;
 		}
 
