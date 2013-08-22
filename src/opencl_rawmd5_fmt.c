@@ -44,29 +44,26 @@
 cl_mem pinned_saved_keys, pinned_saved_idx, pinned_partial_hashes;
 cl_mem buffer_keys, buffer_idx, buffer_out;
 static unsigned int *saved_plain;
-uint64_t *saved_idx;
-static cl_uint *partial_hashes;
-static cl_uint *res_hashes ;
+static uint64_t *saved_idx, key_idx = 0;
+static unsigned int num_keys= 0;
+static cl_uint *partial_hashes, *res_hashes ;
 
 cl_mem buffer_ld_hashes, buffer_outKeyIdx, buffer_mask_gpu;
 static unsigned int *loaded_hashes, cmp_out, *outKeyIdx;
-static struct mask_context msk_ctx;
+static int loaded_count;
 
+cl_mem buffer_bitmap1, buffer_bitmap2;
+static struct bitmap_context_mixed  bitmap1;
+static struct bitmap_context_global bitmap2;
+
+static struct mask_context msk_ctx;
 static unsigned char *mask_offsets;
+static struct db_main *DB;
 
 cl_kernel crk_kernel_nnn, crk_kernel_ccc, crk_kernel_cnn, crk_kernel_om, crk_kernel;
 
 static int self_test = 1; // used as a flag
-static uint64_t key_idx = 0;
 static unsigned int mask_mode = 0;
-static unsigned int num_keys= 0;
-static int loaded_count;
-
-static struct db_main *DB;
-
-static struct bitmap_context_mixed  bitmap1;
-static struct bitmap_context_global bitmap2;
-cl_mem buffer_bitmap1, buffer_bitmap2;
 
 #define MIN(a, b)               (((a) > (b)) ? (b) : (a))
 #define MAX(a, b)               (((a) > (b)) ? (a) : (b))
@@ -577,9 +574,6 @@ static void set_key(char *_key, int index)
 		saved_plain[key_idx++] = *key & (0xffffffffU >> (32 - (len << 3)));
 
 	num_keys++;
-
-
-
 }
 
 static char *get_key_self_test(int index)
