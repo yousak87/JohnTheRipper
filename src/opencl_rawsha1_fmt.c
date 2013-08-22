@@ -52,6 +52,8 @@
 #define uint32_t unsigned int
 #endif
 
+#define RAWSHA1_DEBUG 0
+
 typedef struct {
 	uint32_t h0,h1,h2,h3,h4;
 } SHA_DEV_CTX;
@@ -65,9 +67,10 @@ static unsigned int *saved_plain, num_keys = 0;
 static uint64_t *saved_idx, key_idx = 0;
 static int have_full_hashes;
 
-cl_mem buffer_ld_hashes, buffer_bitmap, buffer_outKeyIdx;
+cl_mem buffer_ld_hashes, buffer_bitmap1, buffer_bitmap2, buffer_outKeyIdx;
 static unsigned int *loaded_hashes, *outKeyIdx, cmp_out = 0;
-static struct bitmap_ctx bitmap;
+static struct bitmap_context_mixed bitmap1;
+static struct bitmap_context_global bitmap2;
 static int loaded_count = 0;
 
 cl_mem buffer_mask_gpu;
@@ -182,7 +185,8 @@ static void release_clobj(void){
 
 		HANDLE_CLERROR(clReleaseMemObject(buffer_ld_hashes), "Release loaded hashes");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), "Release output key indices");
-		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap), "Release bitmap buffer");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap1), "Release bitmap buffer");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap2), "Release bitmap buffer");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release gpu mask buffer");
 	}
 }
@@ -321,17 +325,17 @@ static void set_kernel_args(cl_kernel *kernel) {
 		"Error setting argument 0");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_idx), (void*) &buffer_idx ),
 		"Error setting argument 1");
-	//HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_out), (void*) &buffer_out ),
-	//	"Error setting argument 2");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_ld_hashes), (void*) &buffer_ld_hashes ),
 		"Error setting argument 2");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_outKeyIdx), (void*) &buffer_outKeyIdx ),
 		"Error setting argument 3");
-	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_bitmap), (void*) &buffer_bitmap ),
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_bitmap1), (void*) &buffer_bitmap1),
 		"Error setting argument 4");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_bitmap2), (void*) &buffer_bitmap2),
+		"Error setting argument 5");
 	if(mask_mode)
 		HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu),
-			"Error setting argument 5");
+			"Error setting argument 6");
 }
 
 static void opencl_sha1_reset(struct db_main *db) {
@@ -353,7 +357,9 @@ static void opencl_sha1_reset(struct db_main *db) {
 		/* buffer_outKeyIdx is multiplexed for use as mask_offset input and keyIdx output */
 		buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, length, NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer outkeyIdx\n");
-		buffer_bitmap = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_ctx), NULL, &ret_code);
+		buffer_bitmap1 = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_context_mixed), NULL, &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
+		buffer_bitmap2 = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_context_global), NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
 		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
@@ -406,7 +412,7 @@ static void load_hash(struct db_salt *salt) {
 
 	if(i != (salt->count)) {
 		fprintf(stderr, "Something went wrong while loading hashes to gpu..Exiting..\n");
-		exit(0);
+		exit(EXIT_FAILURE);
 	}
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_ld_hashes, CL_TRUE, 0, (i * 5 + 1) * sizeof(unsigned int) , loaded_hashes, 0, NULL, NULL), "failed in clEnqueueWriteBuffer loaded_hashes");
@@ -421,6 +427,27 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int index, unsi
 		// divide by 32 , harcoded here and correct only for unsigned int
 		bitmap[hash >> 5] |= (1U << (hash & 31));
 	}
+}
+
+static void load_hashtable_plus(unsigned int *hashtable, unsigned int *loaded_next_hash, unsigned int idx, unsigned int num_loaded_hashes, unsigned int szHashTbl) {
+	unsigned int i;
+#if RAWSHA1_DEBUG
+	unsigned int counter = 0;
+#endif
+	memset(hashtable, 0xFF, szHashTbl * sizeof(unsigned int));
+	memset(loaded_next_hash, 0xFF, num_loaded_hashes * sizeof(unsigned int));
+
+	for (i = 0; i < num_loaded_hashes; ++i) {
+		unsigned int hash = loaded_hashes[i + idx*num_loaded_hashes + 1] & (szHashTbl - 1);
+		loaded_next_hash[i] = hashtable[hash];
+#if RAWSHA1_DEBUG
+		if(!(hashtable[hash]^0xFFFFFFFF)) counter++;
+#endif
+		hashtable[hash] = i;
+	}
+#if RAWSHA1_DEBUG
+	fprintf(stderr, "Hash Table Effectiveness:%lf%%\n", ((double)counter/(double)num_loaded_hashes)*100);
+#endif
 }
 
 static void check_mask_sha1(struct mask_context *msk_ctx) {
@@ -494,15 +521,14 @@ static void check_mask_sha1(struct mask_context *msk_ctx) {
 }
 
 static void load_mask(struct db_main *db) {
-	int i, j;
-
 	if (!db->msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
 	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
 	check_mask_sha1(&msk_ctx);
-
+#if RAWSHA1_DEBUG
+	int i, j;
 	for(i = 0; i < MASK_RANGES_MAX; i++)
 	    printf("%d ",msk_ctx.activeRangePos[i]);
 	printf("\n");
@@ -521,7 +547,7 @@ static void load_mask(struct db_main *db) {
 			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
 			printf("\n");
 	}
-
+#endif
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
 
@@ -702,8 +728,8 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
-	int count = *pcount, i, multiplier;
-	static int flag = 0;
+	int count = *pcount, i;
+	static unsigned int flag, multiplier;
 
 	global_work_size = (count + local_work_size - 1) / local_work_size * local_work_size;
 
@@ -712,15 +738,25 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)
 			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
+//#if RAWSHA1_DEBUG
+		fprintf(stderr, "c/s rate shown in status report is buggy. Multiply the p/s rate with:%d to get actual c/s rate.\n", multiplier);
+//#endif
 		flag = 1;
 	}
 
+	if(mask_mode)
+		*pcount *= multiplier;
+
 	if(loaded_count != (salt->count)) {
 		load_hash(salt);
-		load_bitmap(loaded_count, 0, &bitmap.bitmap0[0], (BITMAP_SIZE_1 / 8));
-		load_bitmap(loaded_count, 1, &bitmap.bitmap1[0], (BITMAP_SIZE_1 / 8));
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap, CL_TRUE, 0, sizeof(struct bitmap_ctx), &bitmap, 0, NULL, NULL ), "Failed Copy data to gpu");
+		load_bitmap(loaded_count, 0, &bitmap1.bitmap0[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 1, &bitmap1.bitmap1[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 2, &bitmap1.bitmap2[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 3, &bitmap1.bitmap3[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 0, &bitmap1.gbitmap0[0], (BITMAP_SIZE_3 / 8));
+		load_hashtable_plus(&bitmap2.hashtable0[0], &bitmap1.loaded_next_hash[0], 2, loaded_count, HASH_TABLE_SIZE_0);
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap1, CL_TRUE, 0, sizeof(struct bitmap_context_mixed), &bitmap1, 0, NULL, NULL ), "Failed Copy data to gpu");
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap2, CL_TRUE, 0, sizeof(struct bitmap_context_global), &bitmap2, 0, NULL, NULL ), "Failed Copy data to gpu");
 	}
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0, 4 * key_idx, saved_plain, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_keys");
@@ -744,8 +780,6 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		cmp_out = outKeyIdx[i]?0xffffffff:0;
 
 	if(cmp_out) {
-		// read back partial hashes
-		//HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, partial_hashes, 0, NULL, NULL), "failed in reading data back");
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0, sizeof(cl_uint) * loaded_count * 2, outKeyIdx, 0, NULL, NULL), "failed in reading cracked key indices back");
 		for(i = 0; i < loaded_count; i++) {
 			if(outKeyIdx[i])
