@@ -31,7 +31,7 @@
 #define BENCHMARK_COMMENT		""
 #define BENCHMARK_LENGTH		-1
 
-#define PLAINTEXT_LENGTH    	55 /* Max. is 55 with current kernel */
+#define PLAINTEXT_LENGTH    		55 /* Max. is 55 with current kernel */
 #define BUFSIZE				((PLAINTEXT_LENGTH+3)/4*4)
 #define HASH_LENGTH			(2 * DIGEST_SIZE)
 #define CIPHERTEXT_LENGTH		(HASH_LENGTH + TAG_LENGTH)
@@ -321,17 +321,17 @@ static void set_kernel_args(cl_kernel *kernel) {
 		"Error setting argument 0");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_idx), (void*) &buffer_idx ),
 		"Error setting argument 1");
-	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_out), (void*) &buffer_out ),
-		"Error setting argument 2");
+	//HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_out), (void*) &buffer_out ),
+	//	"Error setting argument 2");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_ld_hashes), (void*) &buffer_ld_hashes ),
-		"Error setting argument 3");
+		"Error setting argument 2");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_outKeyIdx), (void*) &buffer_outKeyIdx ),
-		"Error setting argument 4");
+		"Error setting argument 3");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_bitmap), (void*) &buffer_bitmap ),
-		"Error setting argument 5");
+		"Error setting argument 4");
 	if(mask_mode)
 		HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu),
-			"Error setting argument 6");
+			"Error setting argument 5");
 }
 
 static void opencl_sha1_reset(struct db_main *db) {
@@ -395,11 +395,11 @@ static void load_hash(struct db_salt *salt) {
 		bin = (unsigned int *)pw -> binary;
 		// Potential segfault if removed
 		if(bin != NULL) {
-			loaded_hashes[i*5 + 1] = bin[0];
-			loaded_hashes[i*5 + 2] = bin[1];
-			loaded_hashes[i*5 + 3] = bin[2];
-			loaded_hashes[i*5 + 4] = bin[3];
-			loaded_hashes[i*5 + 5] = bin[4];
+			loaded_hashes[i + 1] = bin[0];
+			loaded_hashes[i + 1 + loaded_count] = bin[1];
+			loaded_hashes[i + 1 + 2 * loaded_count] = bin[2];
+			loaded_hashes[i + 1 + 3 * loaded_count] = bin[3];
+			loaded_hashes[i + 1 + 4 * loaded_count] = bin[4];
 			i++ ;
 		}
 	} while ((pw = pw -> next)) ;
@@ -417,7 +417,7 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int index, unsi
 	memset(bitmap, 0, szBmp);
 
 	for(i = 0; i < num_loaded_hashes; i++) {
-		hash = loaded_hashes[index + i * 5 + 1] & (szBmp * 8 - 1);
+		hash = loaded_hashes[index * num_loaded_hashes + i + 1] & (szBmp * 8 - 1);
 		// divide by 32 , harcoded here and correct only for unsigned int
 		bitmap[hash >> 5] |= (1U << (hash & 31));
 	}
@@ -637,33 +637,43 @@ static int cmp_all(void *binary, int count)
 
 static int cmp_one(void *binary, int index)
 {
-	if(!self_test) return 1;
 	return (((unsigned int*)binary)[0] == partial_hashes[index]);
 }
-
 
 static int cmp_exact(char *source, int count) {
 
 	if(self_test || cmp_out) {
 		unsigned int *t = (unsigned int *) binary(source);
 		unsigned int num = self_test ? global_work_size: loaded_count;
-		if (!have_full_hashes){
-			clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
-				sizeof(cl_uint) * num,
-				sizeof(cl_uint) * 4 * num, res_hashes, 0,
-				NULL, NULL);
-			have_full_hashes = 1;
-		}
+		if(self_test) {
+			if (!have_full_hashes){
+				clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
+					sizeof(cl_uint) * num,
+					sizeof(cl_uint) * 4 * num, res_hashes, 0,
+					NULL, NULL);
+				have_full_hashes = 1;
+			}
 
-		if (t[1]!=res_hashes[count])
-			return 0;
-		if (t[2]!=res_hashes[1 * num + count])
-			return 0;
-		if (t[3]!=res_hashes[2 * num + count])
-			return 0;
-		if (t[4]!=res_hashes[3 * num + count])
-		return 0;
-		return 1;
+			if (t[1]!=res_hashes[count])
+				return 0;
+			if (t[2]!=res_hashes[1 * num + count])
+				return 0;
+			if (t[3]!=res_hashes[2 * num + count])
+				return 0;
+			if (t[4]!=res_hashes[3 * num + count])
+				return 0;
+			return 1;
+		}
+		else {
+			if(!outKeyIdx[count]) return 0;
+			if (t[1]!=loaded_hashes[count + num + 1])
+				return 0;
+			if (t[2]!=loaded_hashes[2 * num + count +1])
+				return 0;
+			if (t[3]!=loaded_hashes[3 * num  + count + 1])
+				return 0;
+			return 1;
+		}
 	}
 
 	return 0;
@@ -735,8 +745,13 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 	if(cmp_out) {
 		// read back partial hashes
-		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, partial_hashes, 0, NULL, NULL), "failed in reading data back");
+		//HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, partial_hashes, 0, NULL, NULL), "failed in reading data back");
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0, sizeof(cl_uint) * loaded_count * 2, outKeyIdx, 0, NULL, NULL), "failed in reading cracked key indices back");
+		for(i = 0; i < loaded_count; i++) {
+			if(outKeyIdx[i])
+				partial_hashes[i] = loaded_hashes[i+1];
+			else partial_hashes[i] = 0;
+		}
 		if(msk_ctx.flg_wrd)
 			memcpy(mask_offsets, mask_offset_buffer, (DB->format->params.max_keys_per_crypt));
 		have_full_hashes = 0;

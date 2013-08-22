@@ -349,7 +349,7 @@ inline uint SWAP32(uint x)
 		printf("\n"); \
 	}
 
-void cmp(__global uint *hashes,
+void cmp(//__global uint *hashes,
 	  __global uint *loaded_hashes,
 	  __local uint *bitmap0,
 	  __local uint *bitmap1,
@@ -377,20 +377,20 @@ void cmp(__global uint *hashes,
 			tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
 			if(tmp) {
 
-				loaded_hash = loaded_hashes[i * 5 + 3];
+				loaded_hash = loaded_hashes[i + 1 + 2 * num_loaded_hashes];
 				if(hash[2] == loaded_hash) {
 
-					loaded_hash = loaded_hashes[i * 5 + 4];
+					loaded_hash = loaded_hashes[i + 1 + 3 * num_loaded_hashes];
 					if(hash[3] == loaded_hash) {
 
-						loaded_hash = loaded_hashes[i * 5 + 5];
+						loaded_hash = loaded_hashes[i + 1 + 4 * num_loaded_hashes];
 						if(hash[4] == loaded_hash) {
 
-							hashes[i] = hash[0];
+							/*hashes[i] = hash[0];
 							hashes[1 * num_loaded_hashes + i] = hash[1];
 							hashes[2 * num_loaded_hashes + i] = hash[2];
 							hashes[3 * num_loaded_hashes + i] = hash[3];
-							hashes[4 * num_loaded_hashes + i] = hash[4];
+							hashes[4 * num_loaded_hashes + i] = hash[4];*/
 							outKeyIdx[i] = gid | 0x80000000;
 							outKeyIdx[i + num_loaded_hashes] = keyIdx;
 
@@ -432,7 +432,7 @@ __kernel void sha1_self_test(__global uint* keys, __global const ulong *index, _
 
 __kernel void sha1_om(__global uint* keys,
 		      __global const ulong *index,
-		      __global uint* digest,
+		      //__global uint* digest,
 		      __global uint *loaded_hashes,
 		      __global uint *outKeyIdx,
 		      __global struct bitmap_ctx *bitmap)
@@ -473,12 +473,12 @@ __kernel void sha1_om(__global uint* keys,
 
 	sha1_init(output);
 	sha1_block(W, output);
-	cmp(digest, loaded_hashes, sbitmap0, sbitmap1, output, outKeyIdx, gid, num_loaded_hashes, 0);
+	cmp(/*digest,*/ loaded_hashes, sbitmap0, sbitmap1, output, outKeyIdx, gid, num_loaded_hashes, 0);
 }
 
 __kernel void sha1_mm(__global uint* keys,
 				__global const ulong *index,
-				__global uint* digest,
+				//__global uint* digest,
 				__global uint *loaded_hashes,
 				__global uint *outKeyIdx,
 				__global struct bitmap_ctx *bitmap,
@@ -556,7 +556,7 @@ __kernel void sha1_mm(__global uint* keys,
 				PUTCHAR_BE(W, activeRangePos[0], ranges[i]);
 				sha1_init(output);
 				sha1_block(W, output);
-				cmp(digest, loaded_hashes, sbitmap0, sbitmap1, output, outKeyIdx, gid, num_loaded_hashes, ctr++);
+				cmp(/*digest,*/ loaded_hashes, sbitmap0, sbitmap1, output, outKeyIdx, gid, num_loaded_hashes, ctr++);
 			}
 
 			j++;
