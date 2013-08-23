@@ -162,13 +162,13 @@ void cmp(__global uint *hashes,
 	}
  }
 
-__kernel void md4_self_test(__global const uint *keys, __global const uint *index, __global uint *hashes)
+__kernel void md4_self_test(__global const uint *keys, __global const ulong *index, __global uint *hashes)
 {
 	uint gid = get_global_id(0);
 	uint W[16] = { 0 };
 	uint i;
 	uint num_keys = get_global_size(0);
-	uint base = index[gid];
+	ulong base = index[gid];
 	uint len = base & 63;
 	uint hash[4];
 
@@ -186,7 +186,7 @@ __kernel void md4_self_test(__global const uint *keys, __global const uint *inde
 }
 
 __kernel void md4(__global const uint *keys,
-		  __global const uint *index,
+		  __global const ulong *index,
 		  __global uint *hashes,
 		  __global uint *loaded_hashes,
 		  __global uint *outKeyIdx,
@@ -196,7 +196,7 @@ __kernel void md4(__global const uint *keys,
 	uint gid = get_global_id(0), lid = get_local_id(0);
 	uint W[16] = { 0 };
 	uint num_keys = get_global_size(0);
-	uint base = index[gid];
+	ulong base = index[gid];
 	uint len = base & 63;
 	uint hash[4];
 	uint num_loaded_hashes = loaded_hashes[0];
