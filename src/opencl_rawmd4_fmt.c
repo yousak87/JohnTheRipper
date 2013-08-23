@@ -49,6 +49,8 @@ static cl_uint *res_hashes;
 static unsigned int *saved_plain, *saved_idx, *loaded_hashes, cmp_out = 0, *outKeyIdx;
 static unsigned int key_idx = 0, loaded_count = 0;
 static unsigned int benchmark = 1; //Used as a flag
+static unsigned int num_keys = 0;
+static unsigned int mask_mode = 0;
 static struct mask_context msk_ctx;
 static struct db_main *DB;
 static unsigned char *mask_offsets;
@@ -244,6 +246,9 @@ static void init(struct fmt_main *self)
 	else {
 		find_best_gws(self, ocl_gpu_id);
 	}
+	if(options.mask)
+		mask_mode = 1;
+
 	if (options.verbosity > 2)
 		fprintf(stderr,
 		        "Local worksize (LWS) %zd, global worksize (GWS) %zd\n",
@@ -307,6 +312,7 @@ static int get_hash_6(int index) { return partial_hashes[index] & 0x7ffffff; }
 static void clear_keys(void)
 {
 	key_idx = 0;
+	num_keys = 0;
 }
 
 
@@ -468,6 +474,15 @@ static void check_mask_md4(struct mask_context *msk_ctx) {
 		msk_ctx -> activeRangePos[2] = msk_ctx -> activeRangePos[1];
 		msk_ctx -> activeRangePos[1] = i;
 	}
+	/* Consecutive charchters in ranges that have all the charchters consective are
+	 * arranged in ascending order. This is to make password generation on host and device
+	 * match each other for kernels that have consecutive charchter optimizations.*/
+	for( i = 0; i < msk_ctx->count; i++)
+		if(msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start != 0) {
+			for (j = 0; j < msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count; j++)
+				msk_ctx->ranges[msk_ctx -> activeRangePos[i]].chars[j] =
+					msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start + j;
+		}
 }
 
 static void load_mask(struct db_main *db) {
@@ -515,6 +530,7 @@ static void set_key(char *_key, int index)
 	}
 	if (len)
 		saved_plain[key_idx++] = *key & (0xffffffffU >> (32 - (len << 3)));
+	num_keys++;
 }
 
 static char *get_key_self_test(int index)
@@ -552,9 +568,9 @@ static char *get_key(int index)
 	static char out[PLAINTEXT_LENGTH + 1];
 	char *key;
 	int i, len;
-	int ctr = 0, mask_offset = 0;
+	int ctr = 0, mask_offset = 0, flag = 0;
 
-	if(index < loaded_count) {
+	if((index < loaded_count) && cmp_out) {
 		ctr = outKeyIdx[index + loaded_count];
 		/* outKeyIdx contains all zero when no new passwords are cracked.
 		 * Hence during status checks even if index is less than loaded count
@@ -562,15 +578,16 @@ static char *get_key(int index)
 		 */
 		index = outKeyIdx[index] & 0x7fffffff;
 		mask_offset = mask_offsets[index];
+		flag = 1;
 	}
-
+	index = (index > num_keys)? (num_keys?num_keys-1:0): index;
 	len = saved_idx[index] & 63;
 	key = (char*)&saved_plain[saved_idx[index] >> 6];
 
 	for (i = 0; i < len; i++)
 		out[i] = *key++;
 
-	if(cmp_out)
+	if(cmp_out && flag && mask_mode)
 		passgen(ctr, mask_offset, out);
 
 	out[i] = 0;
