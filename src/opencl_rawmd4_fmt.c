@@ -43,7 +43,7 @@ cl_command_queue queue_prof;
 cl_mem pinned_saved_keys, pinned_saved_idx, pinned_partial_hashes;
 cl_mem buffer_keys, buffer_idx, buffer_out, buffer_ld_hashes, buffer_outKeyIdx;
 cl_mem buffer_mask_gpu;
-cl_kernel crk_kernel;
+cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
 static cl_uint *partial_hashes;
 static cl_uint *res_hashes;
 static unsigned int *saved_plain, *loaded_hashes, cmp_out = 0, *outKeyIdx;
@@ -166,7 +166,8 @@ static void done(void)
 	release_clobj();
 
 	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 }
 
@@ -209,7 +210,10 @@ static void init(struct fmt_main *self)
 	crypt_kernel = clCreateKernel(program[ocl_gpu_id], "md4_self_test", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
-	crk_kernel = clCreateKernel(program[ocl_gpu_id], "md4", &ret_code);
+	crk_kernel_mm = clCreateKernel(program[ocl_gpu_id], "md4_mm", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+
+	crk_kernel_om = clCreateKernel(program[ocl_gpu_id], "md4_om", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
 	local_work_size = global_work_size = 0;
@@ -316,64 +320,72 @@ static void clear_keys(void)
 	num_keys = 0;
 }
 
+static void setKernelArgs(cl_kernel *kernel) {
+	int argIndex = 0;
+
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_keys), (void*) &buffer_keys),
+		"Error setting argument 0");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_idx), (void*) &buffer_idx ),
+		"Error setting argument 1");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_out), (void*) &buffer_out ),
+		"Error setting argument 2");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_ld_hashes), (void*) &buffer_ld_hashes ),
+		"Error setting argument 3");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_outKeyIdx), (void*) &buffer_outKeyIdx ),
+		"Error setting argument 4");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_bitmap), (void*) &buffer_bitmap ),
+		"Error setting argument 5");
+	if(mask_mode)
+		HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu),
+			"Error setting argument 6");
+}
 
 static void opencl_md4_reset(struct db_main *db) {
 
-
 	if(db) {
-	int argIndex, length = 0;
+		int length = 0;
 
-	// Hardcoded for cracking kernels.
-	local_work_size = LWS;
-	db->format->params.min_keys_per_crypt = local_work_size;
+		// Hardcoded for cracking kernels.
+		local_work_size = LWS;
+		db->format->params.min_keys_per_crypt = local_work_size;
 
-	loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) * 4 + 1)*sizeof(unsigned int));
-	outKeyIdx     = (unsigned int*)mem_calloc((db->password_count) * sizeof(unsigned int) * 2);
-	mask_offsets  = (unsigned char*) mem_calloc(db->format->params.max_keys_per_crypt);
+		loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) * 4 + 1)*sizeof(unsigned int));
+		outKeyIdx     = (unsigned int*)mem_calloc((db->password_count) * sizeof(unsigned int) * 2);
+		mask_offsets  = (unsigned char*) mem_calloc(db->format->params.max_keys_per_crypt);
 
-	buffer_ld_hashes = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, ((db->password_count) * 4 + 1)*sizeof(int), NULL, &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
-	length = ((db->format->params.max_keys_per_crypt) > ((db->password_count) * sizeof(unsigned int) * 2)) ?
-		  (db->format->params.max_keys_per_crypt) : ((db->password_count) * sizeof(unsigned int) * 2);
-	/* buffer_outKeyIdx is multiplexed for use as mask_offset input and keyIdx output */
-	buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, length, NULL, &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating buffer outkeyIdx\n");
-	buffer_bitmap = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_ctx), NULL, &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
-	buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
-	HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
+		buffer_ld_hashes = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, ((db->password_count) * 4 + 1)*sizeof(int), NULL, &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
+		length = ((db->format->params.max_keys_per_crypt) > ((db->password_count) * sizeof(unsigned int) * 2)) ?
+			  (db->format->params.max_keys_per_crypt) : ((db->password_count) * sizeof(unsigned int) * 2);
+		/* buffer_outKeyIdx is multiplexed for use as mask_offset input and keyIdx output */
+		buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, length, NULL, &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating buffer outkeyIdx\n");
+		buffer_bitmap = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_ctx), NULL, &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
+		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
 
-	argIndex = 0;
+		benchmark = 0;
 
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_keys), (void*) &buffer_keys),
-		"Error setting argument 0");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_idx), (void*) &buffer_idx ),
-		"Error setting argument 1");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_out), (void*) &buffer_out ),
-		"Error setting argument 2");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_ld_hashes), (void*) &buffer_ld_hashes ),
-		"Error setting argument 3");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_outKeyIdx), (void*) &buffer_outKeyIdx ),
-		"Error setting argument 4");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_bitmap), (void*) &buffer_bitmap ),
-		"Error setting argument 5");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu),
-		"Error setting argument 6");
+		if(mask_mode) {
+			setKernelArgs(&crk_kernel_mm);
+			db -> max_int_keys = 26 * 26 * 10;
+			crk_kernel = crk_kernel_mm;
+			DB = db;
+		}
 
-	db -> max_int_keys = 26 * 26 * 10;
+		else {
+			setKernelArgs(&crk_kernel_om);
+			crk_kernel = crk_kernel_om;
+		}
 
-	benchmark = 0;
+		if (options.verbosity > 2)
+			fprintf(stderr,
+				"New local worksize (LWS) %zd\n",
+				local_work_size);
 
-	if (options.verbosity > 2)
-		fprintf(stderr,
-		        "New local worksize (LWS) %zd\n",
-		        local_work_size);
-
-	db->format->methods.crypt_all = crypt_all;
-	db->format->methods.get_key = get_key;
-
-	DB = db;
-
+		db->format->methods.crypt_all = crypt_all;
+		db->format->methods.get_key = get_key;
 	}
 }
 
@@ -641,7 +653,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 	global_work_size = (count + local_work_size - 1) / local_work_size * local_work_size;
 
-	if(!flag) {
+	if(!flag && mask_mode) {
 		load_mask(DB);
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)

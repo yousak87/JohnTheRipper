@@ -185,7 +185,50 @@ __kernel void md4_self_test(__global const uint *keys, __global const ulong *ind
 	hashes[3 * num_keys + gid] = hash[3] + 0x10325476;
 }
 
-__kernel void md4(__global const uint *keys,
+__kernel void md4_om(__global const uint *keys,
+			    __global const ulong *index,
+			    __global uint *hashes,
+			    __global uint *loaded_hashes,
+			    __global uint *outKeyIdx,
+			    __global struct bitmap_ctx *bitmap)
+{
+	uint gid = get_global_id(0);
+	uint W[16] = { 0 };
+	uint i;
+	uint num_keys = get_global_size(0);
+	uint lid =get_local_id(0);
+	ulong base = index[gid];
+	uint len = base & 63;
+	uint num_loaded_hashes = loaded_hashes[0];
+	uint hash[4];
+
+	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap0[i*LWS + lid] = bitmap[0].bitmap0[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap1[i*LWS + lid] = bitmap[0].bitmap1[i*LWS + lid];
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	if(gid==1)
+		for (i = 0; i < num_loaded_hashes; i++)
+			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+	barrier(CLK_GLOBAL_MEM_FENCE);
+
+	keys += base >> 6;
+
+	for (i = 0; i < (len+3)/4; i++)
+		W[i] = *keys++;
+
+	md4_encrypt(hash, W, len);
+	cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, gid, num_loaded_hashes, 0);
+
+}
+
+__kernel void md4_mm(__global const uint *keys,
 		  __global const ulong *index,
 		  __global uint *hashes,
 		  __global uint *loaded_hashes,
