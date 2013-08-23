@@ -20,6 +20,7 @@
 
 #define BITMAP_HASH_0 	    (BITMAP_SIZE_0 - 1)
 #define BITMAP_HASH_1	    (BITMAP_SIZE_1 - 1)
+#define BITMAP_HASH_3	    (BITMAP_SIZE_3 - 1)
 
 #if gpu_amd(DEVICE_INFO)
 #define USE_BITSELECT
@@ -119,6 +120,11 @@ void md4_encrypt(__private uint *hash, __private uint *W, uint len) {
 void cmp( __global uint *loaded_hashes,
 	  __local uint *bitmap0,
 	  __local uint *bitmap1,
+	  __local uint *bitmap2,
+	  __local uint *bitmap3,
+	  __global uint *gbitmap0,
+	  __global uint *hashtable0,
+	  __global uint *loaded_hash_next,
 	  __private uint *hash,
 	  __global uint *outKeyIdx,
 	  uint gid,
@@ -132,26 +138,30 @@ void cmp( __global uint *loaded_hashes,
 	hash[2] += 0x98badcfe;
 	hash[3] += 0x10325476;
 
-	for(i = 0; i < num_loaded_hashes; i++) {
-
-		loaded_hash = hash[0] & BITMAP_HASH_1;
-		tmp = (bitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
+	loaded_hash = hash[0] & BITMAP_HASH_1;
+	tmp = (bitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
+	loaded_hash = hash[1] & BITMAP_HASH_1;
+	tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
+	loaded_hash = hash[2] & BITMAP_HASH_1;
+	tmp &= (bitmap2[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
+	loaded_hash = hash[3] & BITMAP_HASH_1;
+	tmp &= (bitmap3[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
+	if(tmp) {
+		loaded_hash = hash[0] & BITMAP_HASH_3;
+		tmp &= (gbitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
 		if(tmp) {
-
-			loaded_hash = hash[1] & BITMAP_HASH_1;
-			tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
-			if(tmp) {
-
-				loaded_hash = loaded_hashes[i + 2 * num_loaded_hashes + 1];
-				if(hash[2] == loaded_hash) {
-
-					loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
-					if(hash[3] == loaded_hash) {
-
+			i = hashtable0[hash[2] & (HASH_TABLE_SIZE_0 - 1)];
+			if(i ^ 0xFFFFFFFF) {
+				do {
+					if (hash[0] == loaded_hashes[i + 1])
+					if ((hash[1] == loaded_hashes[i + num_loaded_hashes + 1]) &&
+					    (hash[2] == loaded_hashes[i + 2 * num_loaded_hashes + 1]) &&
+					    (hash[3] == loaded_hashes[i + 3 * num_loaded_hashes + 1])) {
 						outKeyIdx[i] = gid | 0x80000000;
 						outKeyIdx[i + num_loaded_hashes] = keyIdx;
 					}
-				}
+					i = loaded_hash_next[i];
+				} while(i ^ 0xFFFFFFFF);
 			}
 		}
 	}
@@ -184,7 +194,9 @@ __kernel void md4_om(__global const uint *keys,
 			    __global const ulong *index,
 			    __global uint *loaded_hashes,
 			    __global uint *outKeyIdx,
-			    __global struct bitmap_ctx *bitmap)
+			    __global struct bitmap_context_mixed *bitmap1,
+			    __global struct bitmap_context_global *bitmap2
+		    )
 {
 	uint gid = get_global_id(0);
 	uint W[16] = { 0 };
@@ -198,12 +210,20 @@ __kernel void md4_om(__global const uint *keys,
 
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
 	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap2[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap3[BITMAP_SIZE_1 >> 5];
 
 	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
-		sbitmap0[i*LWS + lid] = bitmap[0].bitmap0[i*LWS + lid];
+		sbitmap0[i*LWS + lid] = bitmap1[0].bitmap0[i*LWS + lid];
 
 	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
-		sbitmap1[i*LWS + lid] = bitmap[0].bitmap1[i*LWS + lid];
+		sbitmap1[i*LWS + lid] = bitmap1[0].bitmap1[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap2[i*LWS + lid] = bitmap1[0].bitmap2[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
 
 	barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -218,7 +238,10 @@ __kernel void md4_om(__global const uint *keys,
 		W[i] = *keys++;
 
 	md4_encrypt(hash, W, len);
-	cmp(loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, gid, num_loaded_hashes, 0);
+	cmp(loaded_hashes,
+	    sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap1[0].gbitmap0[0],
+	    &bitmap2[0].hashtable0[0], &bitmap1[0].loaded_next_hash[0],
+	    hash, outKeyIdx, gid, num_loaded_hashes, 0);
 
 }
 
@@ -226,7 +249,8 @@ __kernel void md4_mm(__global const uint *keys,
 		  __global const ulong *index,
 		  __global uint *loaded_hashes,
 		  __global uint *outKeyIdx,
-		  __global struct bitmap_ctx *bitmap,
+		  __global struct bitmap_context_mixed *bitmap1,
+		  __global struct bitmap_context_global *bitmap2,
 		  __global struct mask_context *msk_ctx	)
 {
 	uint gid = get_global_id(0), lid = get_local_id(0);
@@ -242,6 +266,8 @@ __kernel void md4_mm(__global const uint *keys,
 	__local uchar ranges[3 * MAX_GPU_CHARS];
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
 	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap2[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap3[BITMAP_SIZE_1 >> 5];
 
 	for(i = 0; i < 3; i++) {
 		activeRangePos[i] = msk_ctx[0].activeRangePos[i];
@@ -256,10 +282,16 @@ __kernel void md4_mm(__global const uint *keys,
 	ranges[lid + 2 * MAX_GPU_CHARS] = msk_ctx[0].ranges[activeRangePos[2]].chars[lid];
 
 	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
-		sbitmap0[i*LWS + lid] = bitmap[0].bitmap0[i*LWS + lid];
+		sbitmap0[i*LWS + lid] = bitmap1[0].bitmap0[i*LWS + lid];
 
 	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
-		sbitmap1[i*LWS + lid] = bitmap[0].bitmap1[i*LWS + lid];
+		sbitmap1[i*LWS + lid] = bitmap1[0].bitmap1[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap2[i*LWS + lid] = bitmap1[0].bitmap2[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
 
 	barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -291,7 +323,10 @@ __kernel void md4_mm(__global const uint *keys,
 			for (i = 0; i < rangeNumChars[0]; i++) {
 				PUTCHAR(W, activeRangePos[0], ranges[i]);
 				md4_encrypt(hash, W, len);
-				cmp(loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, gid, num_loaded_hashes, ctr++);
+				cmp(loaded_hashes,
+				    sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap1[0].gbitmap0[0],
+				    &bitmap2[0].hashtable0[0], &bitmap1[0].loaded_next_hash[0],
+				    hash, outKeyIdx, gid, num_loaded_hashes, ctr++);
 			}
 
 			j++;
