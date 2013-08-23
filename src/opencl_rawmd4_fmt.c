@@ -10,6 +10,7 @@
  */
 
 #include <string.h>
+#include <math.h>
 
 #include "arch.h"
 #include "params.h"
@@ -39,26 +40,25 @@
 #define FORMAT_TAG          "$MD4$"
 #define TAG_LENGTH          (sizeof(FORMAT_TAG) - 1)
 
-cl_command_queue queue_prof;
 cl_mem pinned_saved_keys, pinned_saved_idx, pinned_partial_hashes;
-cl_mem buffer_keys, buffer_idx, buffer_out, buffer_ld_hashes, buffer_outKeyIdx;
-cl_mem buffer_mask_gpu;
-cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
-static cl_uint *partial_hashes;
-static cl_uint *res_hashes;
-static unsigned int *saved_plain, *loaded_hashes, cmp_out = 0, *outKeyIdx;
+cl_mem buffer_keys, buffer_idx, buffer_out;
 static uint64_t key_idx = 0, *saved_idx;
-static unsigned int loaded_count = 0;
-static unsigned int self_test = 1; //Used as a flag
-static unsigned int num_keys = 0;
+static unsigned int *saved_plain, num_keys = 0;
+static cl_uint *partial_hashes, *res_hashes;
+
+cl_mem buffer_ld_hashes, buffer_outKeyIdx, buffer_bitmap1, buffer_bitmap2;
+static unsigned int *loaded_hashes, cmp_out = 0, *outKeyIdx, loaded_count = 0;
+static struct bitmap_context_mixed bitmap1;
+static struct bitmap_context_global bitmap2;
+
+cl_mem buffer_mask_gpu;
 static unsigned int mask_mode = 0;
 static struct mask_context msk_ctx;
 static struct db_main *DB;
 static unsigned char *mask_offsets;
 
-static struct bitmap_context_mixed bitmap1;
-static struct bitmap_context_global bitmap2;
-cl_mem buffer_bitmap1, buffer_bitmap2;
+cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
+static unsigned int self_test = 1; //Used as a flag
 
 #define MIN(a, b)               (((a) > (b)) ? (b) : (a))
 #define MAX(a, b)               (((a) > (b)) ? (a) : (b))
@@ -73,18 +73,8 @@ cl_mem buffer_bitmap1, buffer_bitmap2;
 
 static int have_full_hashes;
 
-static const char * warn[] = {
-	"pass xfer: "  ,  ", crypt: "    ,  ", result xfer: "
-};
-
-extern void common_find_best_lws(size_t group_size_limit,
-        int sequential_id, cl_kernel crypt_kernel);
-extern void common_find_best_gws(int sequential_id, unsigned int rounds, int step,
-        unsigned long long int max_run_time);
-
 static int crypt_all(int *pcount, struct db_salt *_salt);
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
-static int crypt_all_benchmark(int *pcount, struct db_salt *_salt);
 static char *get_key_self_test(int index);
 static char *get_key(int index);
 
@@ -175,41 +165,8 @@ static void done(void)
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 }
 
-/* ------- Try to find the best configuration ------- */
-/* --
-   This function could be used to calculated the best num
-   for the workgroup
-   Work-items that make up a work-group (also referred to
-   as the size of the work-group)
-   -- */
-static void find_best_lws(struct fmt_main * self, int sequential_id) {
-
-	// Call the default function.
-	common_find_best_lws(
-		get_current_work_group_size(ocl_gpu_id, crypt_kernel),
-		sequential_id, crypt_kernel
-		);
-}
-
-/* --
-   This function could be used to calculated the best num
-   of keys per crypt for the given format
-   -- */
-static void find_best_gws(struct fmt_main * self, int sequential_id) {
-
-	// Call the common function.
-	common_find_best_gws(
-		sequential_id, 1, 0,
-		(cpu(device_info[ocl_gpu_id]) ? 500000000ULL : 1000000000ULL)
-		);
-
-	create_clobj(global_work_size, self);
-}
-
 static void init(struct fmt_main *self)
 {
-	size_t selected_gws, max_mem;
-
 	opencl_init("$JOHN/kernels/md4_kernel.cl", ocl_gpu_id, NULL);
 	crypt_kernel = clCreateKernel(program[ocl_gpu_id], "md4_self_test", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
@@ -223,45 +180,26 @@ static void init(struct fmt_main *self)
 	local_work_size = global_work_size = 0;
 	opencl_get_user_preferences(CONFIG_NAME);
 
-	// Initialize openCL tuning (library) for this format.
-	opencl_init_auto_setup(STEP, 0, 3, NULL, warn,
-	        &multi_profilingEvent[1], self, create_clobj,
-	        release_clobj, BUFSIZE, 0);
-	self->methods.crypt_all = crypt_all_benchmark;
+	/* Round off to nearest power of 2 */
+	if(local_work_size)
+		local_work_size = pow(2, ceil(log(local_work_size)/log(2)));
+	if(!global_work_size)
+		global_work_size = MAX_KEYS_PER_CRYPT;
+	if(!local_work_size)
+		local_work_size = LWS;
 
-	self->params.max_keys_per_crypt = (global_work_size ?
-	        global_work_size : MAX_KEYS_PER_CRYPT);
-	selected_gws = global_work_size;
-
-	if (!local_work_size) {
-		create_clobj(self->params.max_keys_per_crypt, self);
-		find_best_lws(self, ocl_gpu_id);
-		release_clobj();
-	}
-	global_work_size = selected_gws;
-	local_work_size = LWS;
-
-	// Obey device limits
-	if (local_work_size > get_current_work_group_size(ocl_gpu_id, crypt_kernel))
-		local_work_size = get_current_work_group_size(ocl_gpu_id, crypt_kernel);
-	clGetDeviceInfo(devices[ocl_gpu_id], CL_DEVICE_MAX_MEM_ALLOC_SIZE,
-	        sizeof(max_mem), &max_mem, NULL);
-	while (global_work_size > MIN((1<<26)*4/56, max_mem / BUFSIZE))
-		global_work_size -= local_work_size;
-
-	global_work_size = MAX_KEYS_PER_CRYPT;
-	if (global_work_size)
-		create_clobj(global_work_size, self);
-	else {
-		find_best_gws(self, ocl_gpu_id);
-	}
-	if(options.mask)
+	if(options.mask) {
 		mask_mode = 1;
+		local_work_size = LWS;
+	}
+
+	create_clobj((global_work_size + local_work_size - 1) / local_work_size * local_work_size , self);
 
 	if (options.verbosity > 2)
 		fprintf(stderr,
 		        "Local worksize (LWS) %zd, global worksize (GWS) %zd\n",
 		        local_work_size, global_work_size);
+
 	self->params.min_keys_per_crypt = local_work_size;
 	self->params.max_keys_per_crypt = global_work_size;
 	self->methods.crypt_all = crypt_all_self_test;
@@ -349,8 +287,6 @@ static void opencl_md4_reset(struct db_main *db) {
 	if(db) {
 		int length = 0;
 
-		// Hardcoded for cracking kernels.
-		local_work_size = LWS;
 		db->format->params.min_keys_per_crypt = local_work_size;
 
 		loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) * 4 + 1)*sizeof(unsigned int));
@@ -384,11 +320,6 @@ static void opencl_md4_reset(struct db_main *db) {
 			setKernelArgs(&crk_kernel_om);
 			crk_kernel = crk_kernel_om;
 		}
-
-		if (options.verbosity > 2)
-			fprintf(stderr,
-				"New local worksize (LWS) %zd\n",
-				local_work_size);
 
 		db->format->methods.crypt_all = crypt_all;
 		db->format->methods.get_key = get_key;
@@ -518,7 +449,6 @@ static void check_mask_md4(struct mask_context *msk_ctx) {
 }
 
 static void load_mask(struct db_main *db) {
-	int i, j;
 
 	if (!db->msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
@@ -526,25 +456,6 @@ static void load_mask(struct db_main *db) {
 	}
 	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
 	check_mask_md4(&msk_ctx);
-
-	for(i = 0; i < MASK_RANGES_MAX; i++)
-	    printf("%d ",msk_ctx.activeRangePos[i]);
-	printf("\n");
-	for(i = 0; i < MASK_RANGES_MAX; i++)
-	    printf("%d ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].count);
-	printf("\n");
-
-	/*
-	for(i = 0; i < msk_ctx.count; i++)
-	  printf(" %d ", msk_ctx.activeRangePos[i]);*/
-	for(i = 0; i < msk_ctx.count; i++){
-			for(j = 0; j < msk_ctx.ranges[msk_ctx.activeRangePos[i]].count; j++)
-				printf("%c ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].chars[j]);
-			printf("\n");
-			//checkRange(&msk_ctx, msk_ctx.activeRangePos[i]) ;
-			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
-			printf("\n");
-	}
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
@@ -627,25 +538,6 @@ static char *get_key(int index)
 	return out;
 }
 
-static int crypt_all_benchmark(int *pcount, struct db_salt *salt)
-{
-	int count = *pcount;
-
-	global_work_size = (count + local_work_size - 1) / local_work_size * local_work_size;
-
-	// copy keys to the device
-	BENCH_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0, 4 * key_idx, saved_plain, 0, NULL, &multi_profilingEvent[0]), "failed in clEnqueueWriteBuffer buffer_keys");
-	BENCH_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, sizeof(uint64_t) * global_work_size, saved_idx, 0, NULL, &multi_profilingEvent[0]), "failed in clEnqueueWriteBuffer buffer_idx");
-
-	BENCH_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], crypt_kernel, 1, NULL, &global_work_size, &local_work_size, 0, NULL, &multi_profilingEvent[1]), "failed in clEnqueueNDRangeKernel");
-
-	// read back partial hashes
-	BENCH_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * global_work_size, partial_hashes, 0, NULL, &multi_profilingEvent[2]), "failed in reading data back");
-	have_full_hashes = 0;
-
-	return count;
-}
-
 static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 {
 	int count = *pcount;
@@ -677,7 +569,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)
 			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
+		fprintf(stderr, "Multiply the c/s rate with:%d to get the correct c/s rate\n", multiplier);
 		flag = 1;
 	}
 
