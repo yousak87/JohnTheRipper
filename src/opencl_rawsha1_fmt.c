@@ -289,7 +289,7 @@ static void fmt_rawsha1_init(struct fmt_main *self) {
 
 	if (options.mask) {
 		local_work_size = LWS;
-		global_work_size /= 2;
+		global_work_size /= 4;
 		mask_mode = 1;
 	}
 

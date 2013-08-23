@@ -291,8 +291,7 @@ static void opencl_md5_reset(struct db_main *db) {
 	if(db) {
 		unsigned int length = 0;
 
-		db -> format -> params.max_keys_per_crypt = global_work_size;
-		db -> format -> params.min_keys_per_crypt = global_work_size;
+		db->format->params.min_keys_per_crypt = db->format->params.max_keys_per_crypt;
 
 		loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) * 4 + 1)*sizeof(unsigned int));
 		outKeyIdx     = (unsigned int*)mem_alloc((db->password_count) * sizeof(unsigned int) * 2);
