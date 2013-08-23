@@ -49,7 +49,7 @@ static cl_uint *res_hashes;
 static unsigned int *saved_plain, *loaded_hashes, cmp_out = 0, *outKeyIdx;
 static uint64_t key_idx = 0, *saved_idx;
 static unsigned int loaded_count = 0;
-static unsigned int benchmark = 1; //Used as a flag
+static unsigned int self_test = 1; //Used as a flag
 static unsigned int num_keys = 0;
 static unsigned int mask_mode = 0;
 static struct mask_context msk_ctx;
@@ -148,7 +148,7 @@ static void release_clobj(void)
 	HANDLE_CLERROR(clReleaseMemObject(pinned_partial_hashes), "Error Releasing pinned_partial_hashes");
 	MEM_FREE(res_hashes);
 
-	if(!benchmark) {
+	if(!self_test) {
 
 		MEM_FREE(loaded_hashes);
 		MEM_FREE(outKeyIdx);
@@ -327,17 +327,15 @@ static void setKernelArgs(cl_kernel *kernel) {
 		"Error setting argument 0");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_idx), (void*) &buffer_idx ),
 		"Error setting argument 1");
-	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_out), (void*) &buffer_out ),
-		"Error setting argument 2");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_ld_hashes), (void*) &buffer_ld_hashes ),
-		"Error setting argument 3");
+		"Error setting argument 2");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_outKeyIdx), (void*) &buffer_outKeyIdx ),
-		"Error setting argument 4");
+		"Error setting argument 3");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_bitmap), (void*) &buffer_bitmap ),
-		"Error setting argument 5");
+		"Error setting argument 4");
 	if(mask_mode)
 		HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu),
-			"Error setting argument 6");
+			"Error setting argument 5");
 }
 
 static void opencl_md4_reset(struct db_main *db) {
@@ -365,7 +363,7 @@ static void opencl_md4_reset(struct db_main *db) {
 		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
 
-		benchmark = 0;
+		self_test = 0;
 
 		if(mask_mode) {
 			setKernelArgs(&crk_kernel_mm);
@@ -692,9 +690,13 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 
 	if(cmp_out) {
-		// read back partial hashes
-		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, partial_hashes, 0, NULL, NULL), "failed in reading data back");
+
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0, sizeof(cl_uint) * loaded_count * 2, outKeyIdx, 0, NULL, NULL), "failed in reading cracked key indices back");
+		for(i = 0; i < loaded_count; i++) {
+			if(outKeyIdx[i])
+				partial_hashes[i] = loaded_hashes[i+1];
+			else partial_hashes[i] = 0;
+		}
 		if(msk_ctx.flg_wrd)
 			memcpy(mask_offsets, mask_offset_buffer, (DB->format->params.max_keys_per_crypt));
 		have_full_hashes = 0;
@@ -710,7 +712,7 @@ static int cmp_all(void *binary, int count)
 	unsigned int i;
 	unsigned int b = ((unsigned int *) binary)[0];
 
-	if(!benchmark) return 1;
+	if(!self_test) return 1;
 
 	for (i = 0; i < count; i++)
 		if (b == partial_hashes[i])
@@ -720,31 +722,45 @@ static int cmp_all(void *binary, int count)
 
 static int cmp_one(void *binary, int index)
 {
-	if(!benchmark) return 1;
 	return (((unsigned int*)binary)[0] == partial_hashes[index]);
 }
 
-static int cmp_exact(char *source, int count) {
+static int cmp_exact(char *source, int index) {
 
-	if(benchmark || cmp_out) {
+	if(self_test || cmp_out) {
 		unsigned int *t = (unsigned int *) get_binary(source);
-		unsigned int num = benchmark ? global_work_size: loaded_count;
-		if (!have_full_hashes){
-			clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
-				sizeof(cl_uint) * num,
-				sizeof(cl_uint) * 3 * num, res_hashes, 0,
-				NULL, NULL);
-			have_full_hashes = 1;
+		unsigned int num = self_test ? global_work_size: loaded_count;
+
+		if(self_test) {
+			if (!have_full_hashes){
+				clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
+					sizeof(cl_uint) * num,
+					sizeof(cl_uint) * 3 * num, res_hashes, 0,
+					NULL, NULL);
+				have_full_hashes = 1;
+			}
+
+			if (t[1]!=res_hashes[index])
+				return 0;
+			if (t[2]!=res_hashes[1 * num + index])
+				return 0;
+			if (t[3]!=res_hashes[2 * num + index])
+				return 0;
+			return 1;
 		}
 
-		if (t[1]!=res_hashes[count])
-			return 0;
-		if (t[2]!=res_hashes[1 * num + count])
-			return 0;
-		if (t[3]!=res_hashes[2 * num + count])
-			return 0;
-		return 1;
+		else {
+			if(!outKeyIdx[index]) return 0;
+			if (t[1]!=loaded_hashes[index + num + 1])
+				return 0;
+			if (t[2]!=loaded_hashes[2 * num + index +1])
+				return 0;
+			if (t[3]!=loaded_hashes[3 * num + index + 1])
+				return 0;
+			return 1;
+		}
 	}
+
 
 	return 0;
 }

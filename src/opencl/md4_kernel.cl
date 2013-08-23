@@ -116,8 +116,7 @@ void md4_encrypt(__private uint *hash, __private uint *W, uint len) {
 
 }
 
-void cmp(__global uint *hashes,
-	  __global uint *loaded_hashes,
+void cmp( __global uint *loaded_hashes,
 	  __local uint *bitmap0,
 	  __local uint *bitmap1,
 	  __private uint *hash,
@@ -149,10 +148,6 @@ void cmp(__global uint *hashes,
 					loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
 					if(hash[3] == loaded_hash) {
 
-						hashes[i] = hash[0];
-						hashes[1 * num_loaded_hashes + i] = hash[1];
-						hashes[2 * num_loaded_hashes + i] = hash[2];
-						hashes[3 * num_loaded_hashes + i] = hash[3];
 						outKeyIdx[i] = gid | 0x80000000;
 						outKeyIdx[i + num_loaded_hashes] = keyIdx;
 					}
@@ -187,7 +182,6 @@ __kernel void md4_self_test(__global const uint *keys, __global const ulong *ind
 
 __kernel void md4_om(__global const uint *keys,
 			    __global const ulong *index,
-			    __global uint *hashes,
 			    __global uint *loaded_hashes,
 			    __global uint *outKeyIdx,
 			    __global struct bitmap_ctx *bitmap)
@@ -224,13 +218,12 @@ __kernel void md4_om(__global const uint *keys,
 		W[i] = *keys++;
 
 	md4_encrypt(hash, W, len);
-	cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, gid, num_loaded_hashes, 0);
+	cmp(loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, gid, num_loaded_hashes, 0);
 
 }
 
 __kernel void md4_mm(__global const uint *keys,
 		  __global const ulong *index,
-		  __global uint *hashes,
 		  __global uint *loaded_hashes,
 		  __global uint *outKeyIdx,
 		  __global struct bitmap_ctx *bitmap,
@@ -298,7 +291,7 @@ __kernel void md4_mm(__global const uint *keys,
 			for (i = 0; i < rangeNumChars[0]; i++) {
 				PUTCHAR(W, activeRangePos[0], ranges[i]);
 				md4_encrypt(hash, W, len);
-				cmp(hashes, loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, gid, num_loaded_hashes, ctr++);
+				cmp(loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, gid, num_loaded_hashes, ctr++);
 			}
 
 			j++;
