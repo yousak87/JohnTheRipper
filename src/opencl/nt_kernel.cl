@@ -215,7 +215,46 @@ __kernel void nt_self_test(const __global uint *keys , __global uint *output)
 	output[3*num_keys+gid] = hash[3];
 }
 
-__kernel void nt(const __global uint *keys ,
+__kernel void nt_om(const __global uint *keys,
+			  __global uint *output,
+		    const __global uint *loaded_hashes,
+			  __global uint *outKeyIdx,
+		    const __global struct bitmap_ctx *bitmap)
+{
+	uint gid = get_global_id(0);
+	uint nt_buffer[12] = { 0 };
+	uint md4_size = 0, i;
+	uint num_keys = get_global_size(0);
+	uint lid = get_local_id(0);
+	uint num_loaded_hashes = loaded_hashes[0];
+
+	// hash[0] and hash[1] values are sawpped
+	uint hash[4];
+
+	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap0[i*LWS + lid] = bitmap[0].bitmap0[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap1[i*LWS + lid] = bitmap[0].bitmap1[i*LWS + lid];
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	if(gid==1)
+		for (i = 0; i < num_loaded_hashes; i++)
+			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+	barrier(CLK_GLOBAL_MEM_FENCE);
+
+	coalasced_load(nt_buffer, keys, &md4_size, gid, num_keys);
+	nt_crypt(hash, nt_buffer, md4_size);
+	cmp(output, loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, num_loaded_hashes, gid, 0);
+
+
+}
+
+__kernel void nt_mm(const __global uint *keys ,
 		       __global uint *output,
 		 const __global uint *loaded_hashes,
 		       __global uint *outKeyIdx,
