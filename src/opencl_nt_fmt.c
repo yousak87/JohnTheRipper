@@ -43,7 +43,7 @@
 #define SALT_SIZE		0
 
 //2^10 * 2^9
-#define MIN_KEYS_PER_CRYPT	1024*512
+#define MIN_KEYS_PER_CRYPT	1024*2048*4
 #define MAX_KEYS_PER_CRYPT	MIN_KEYS_PER_CRYPT
 
 static struct fmt_tests tests[] = {
@@ -111,6 +111,7 @@ static struct mask_context msk_ctx;
 static struct db_main *DB;
 static unsigned char *mask_offsets;
 static unsigned int num_keys = 0;
+static unsigned int mask_mode = 0;
 
 
 //OpenCL variables
@@ -221,6 +222,9 @@ static void init(struct fmt_main *self){
 	self->params.max_keys_per_crypt = global_work_size;
 	if (!local_work_size)
 		local_work_size = LWS;
+
+	if(options.mask)
+		mask_mode = 1;
 
 	if (options.verbosity > 2)
 		fprintf(stderr, "Local worksize (LWS) %d, Global worksize (GWS) %d\n", (int)local_work_size, (int)global_work_size);
@@ -535,10 +539,19 @@ static void check_mask_nt(struct mask_context *msk_ctx) {
 		msk_ctx -> activeRangePos[2] = msk_ctx -> activeRangePos[1];
 		msk_ctx -> activeRangePos[1] = i;
 	}
+
+	/* Consecutive charchters in ranges that have all the charchters consective are
+	 * arranged in ascending order. This is to make password generation on host and device
+	 * match each other for kernels that have consecutive charchter optimizations.*/
+	for( i = 0; i < msk_ctx->count; i++)
+		if(msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start != 0) {
+			for (j = 0; j < msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count; j++)
+				msk_ctx->ranges[msk_ctx -> activeRangePos[i]].chars[j] =
+					msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start + j;
+		}
 }
 
 static void load_mask(struct db_main *db) {
-	int i, j;
 
 	if (!db->msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
@@ -546,25 +559,6 @@ static void load_mask(struct db_main *db) {
 	}
 	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
 	check_mask_nt(&msk_ctx);
-
-	for(i = 0; i < MASK_RANGES_MAX; i++)
-	    printf("%d ",msk_ctx.activeRangePos[i]);
-	printf("\n");
-	for(i = 0; i < MASK_RANGES_MAX; i++)
-	    printf("%d ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].count);
-	printf("\n");
-
-	/*
-	for(i = 0; i < msk_ctx.count; i++)
-	  printf(" %d ", msk_ctx.activeRangePos[i]);*/
-	for(i = 0; i < msk_ctx.count; i++){
-			for(j = 0; j < msk_ctx.ranges[msk_ctx.activeRangePos[i]].count; j++)
-				printf("%c ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].chars[j]);
-			printf("\n");
-			//checkRange(&msk_ctx, msk_ctx.activeRangePos[i]) ;
-			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
-			printf("\n");
-	}
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
@@ -638,7 +632,7 @@ static char *get_key(int index)
 	}
 	while(get_key_saved[length]);
 
-	if(cmp_out && flag)
+	if(cmp_out && flag && mask_mode)
 		passgen(ctr, mask_offset, get_key_saved);
 
 	return get_key_saved;
