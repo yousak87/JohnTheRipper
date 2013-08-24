@@ -155,8 +155,7 @@ void nt_crypt(__private uint *hash, __private uint *nt_buffer, uint md4_size) {
 
 }
 
-void cmp(__global uint *hashes,
-	  __global const uint *loaded_hashes,
+void cmp( __global const uint *loaded_hashes,
 	  __local uint *bitmap0,
 	  __local uint *bitmap1,
 	  __private uint *hash,
@@ -181,11 +180,6 @@ void cmp(__global uint *hashes,
 					loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
 					if(hash[3] == loaded_hash) {
 
-						hashes[i] = hash[1];
-						hashes[1 * num_loaded_hashes + i] = hash[0];
-						hashes[2 * num_loaded_hashes + i] = hash[2];
-						hashes[3 * num_loaded_hashes + i] = hash[3];
-
 						outKeyIdx[i] = gid | 0x80000000;
 						outKeyIdx[i + num_loaded_hashes] = ctr;
 					}
@@ -202,7 +196,6 @@ __kernel void nt_self_test(const __global uint *keys , __global uint *output)
 	uint md4_size = 0;
 	uint num_keys = get_global_size(0);
 
-	// hash[0] and hash[1] values are sawpped
 	uint hash[4];
 
 	coalasced_load(nt_buffer, keys, &md4_size, gid, num_keys);
@@ -216,7 +209,6 @@ __kernel void nt_self_test(const __global uint *keys , __global uint *output)
 }
 
 __kernel void nt_om(const __global uint *keys,
-			  __global uint *output,
 		    const __global uint *loaded_hashes,
 			  __global uint *outKeyIdx,
 		    const __global struct bitmap_ctx *bitmap)
@@ -228,7 +220,6 @@ __kernel void nt_om(const __global uint *keys,
 	uint lid = get_local_id(0);
 	uint num_loaded_hashes = loaded_hashes[0];
 
-	// hash[0] and hash[1] values are sawpped
 	uint hash[4];
 
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
@@ -249,17 +240,16 @@ __kernel void nt_om(const __global uint *keys,
 
 	coalasced_load(nt_buffer, keys, &md4_size, gid, num_keys);
 	nt_crypt(hash, nt_buffer, md4_size);
-	cmp(output, loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, num_loaded_hashes, gid, 0);
+	cmp(loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, num_loaded_hashes, gid, 0);
 
 
 }
 
 __kernel void nt_mm(const __global uint *keys ,
-		       __global uint *output,
-		 const __global uint *loaded_hashes,
-		       __global uint *outKeyIdx,
-		 const __global struct bitmap_ctx *bitmap,
-		 const __global struct mask_context *msk_ctx)
+		    const __global uint *loaded_hashes,
+		          __global uint *outKeyIdx,
+		    const __global struct bitmap_ctx *bitmap,
+		    const __global struct mask_context *msk_ctx)
 {
 	uint gid = get_global_id(0);
 	uint lid = get_local_id(0);
@@ -321,7 +311,7 @@ __kernel void nt_mm(const __global uint *keys ,
 			for (i = 0; i < rangeNumChars[0]; i++) {
 				PUTCHAR(nt_buffer, activeRangePos[0], ranges[i]);
 				nt_crypt(hash, nt_buffer, md4_size);
-				cmp(output, loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
+				cmp(loaded_hashes, sbitmap0, sbitmap1, hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
 			}
 
 			j++;
