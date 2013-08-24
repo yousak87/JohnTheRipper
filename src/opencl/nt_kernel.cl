@@ -167,20 +167,18 @@ void cmp(__global uint *hashes,
 
 	uint loaded_hash, i, tmp;
 
+	loaded_hash = hash[0] & BITMAP_HASH_1;
+	tmp = (bitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
+	loaded_hash = hash[1] & BITMAP_HASH_1;
+	tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
+	if(tmp) {
+
 	for(i = 0; i < num_loaded_hashes; i++) {
 
-		loaded_hash = hash[0] & BITMAP_HASH_1;
-		tmp = (bitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
-		if(tmp) {
-
-			loaded_hash = hash[1] & BITMAP_HASH_1;
-			tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
-			if(tmp) {
-
-				loaded_hash = loaded_hashes[i * 4 + 3];
+				loaded_hash = loaded_hashes[i + 2 * num_loaded_hashes + 1];
 				if(hash[2] == loaded_hash) {
 
-					loaded_hash = loaded_hashes[i * 4 + 4];
+					loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
 					if(hash[3] == loaded_hash) {
 
 						hashes[i] = hash[1];
@@ -194,7 +192,7 @@ void cmp(__global uint *hashes,
 				}
 			}
 		}
-	}
+
  }
 
 __kernel void nt_self_test(const __global uint *keys , __global uint *output)

@@ -451,10 +451,10 @@ static void load_hash(struct db_salt *salt) {
 		bin = (unsigned int *)pw -> binary;
 		// Potential segfault if removed
 		if(bin != NULL) {
-			loaded_hashes[i*4 + 1] = bin[0];
-			loaded_hashes[i*4 + 2] = bin[1];
-			loaded_hashes[i*4 + 3] = bin[2];
-			loaded_hashes[i*4 + 4] = bin[3];
+			loaded_hashes[i + 1] = bin[0];
+			loaded_hashes[i + loaded_count + 1] = bin[1];
+			loaded_hashes[i + 2 * loaded_count + 1] = bin[2];
+			loaded_hashes[i + 3 * loaded_count + 1] = bin[3];
 			i++ ;
 		}
 	} while ((pw = pw -> next)) ;
@@ -472,7 +472,7 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int index, unsi
 	memset(bitmap, 0, szBmp);
 
 	for(i = 0; i < num_loaded_hashes; i++) {
-		hash = loaded_hashes[index + i * 4 + 1] & (szBmp * 8 - 1);
+		hash = loaded_hashes[index * num_loaded_hashes + i + 1] & (szBmp * 8 - 1);
 		// divide by 32 , harcoded here and correct only for unsigned int
 		bitmap[hash >> 5] |= (1U << (hash & 31));
 	}
