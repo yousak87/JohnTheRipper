@@ -78,6 +78,8 @@ void coalasced_load(__private uint *nt_buffer, const __global uint *keys, uint *
 
 	(*md4_size) -= (a | b | c | d);
 
+	(*md4_size) = (*md4_size) % 24;
+
 	temp = (*md4_size) >> 1;
 
 	nt_buffer[temp] =  ((b&1) << 23) | (a << 5) | (d << 23) | (c << 6) | (nt_buffer[temp] & 0xFF);
