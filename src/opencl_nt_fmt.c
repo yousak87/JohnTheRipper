@@ -19,6 +19,7 @@
  */
 
 #include <string.h>
+#include <math.h>
 
 #include "arch.h"
 #include "misc.h"
@@ -43,7 +44,7 @@
 #define SALT_SIZE		0
 
 //2^10 * 2^9
-#define MIN_KEYS_PER_CRYPT	(1024*2048*4)
+#define MIN_KEYS_PER_CRYPT	(1024*2048*2)
 #define MAX_KEYS_PER_CRYPT	MIN_KEYS_PER_CRYPT
 
 static struct fmt_tests tests[] = {
@@ -100,35 +101,34 @@ static struct fmt_tests tests[] = {
 #define SQRT_2 0x5a827999
 #define SQRT_3 0x6ed9eba1
 
-static cl_uint *bbbs;
-static cl_uint *res_hashes;
+cl_mem 	pinned_saved_keys, pinned_bbbs, buffer_out, buffer_keys;
+static cl_uint *bbbs, *res_hashes;
 static char *saved_plain;
 static int max_key_length = 0;
 static char get_key_saved[PLAINTEXT_LENGTH+1];
+static unsigned int num_keys = 0;
+static int have_full_hashes;
+
+cl_mem buffer_ld_hashes, buffer_outKeyIdx;
+cl_mem buffer_bitmap1, buffer_bitmap2;
 static unsigned int *loaded_hashes, loaded_count, cmp_out, *outKeyIdx;
-static unsigned int benchmark = 1; //Used as a flag
+static struct bitmap_context_mixed *bitmap1;
+static struct bitmap_context_global *bitmap2;
+
+cl_mem  buffer_mask_gpu;
 static struct mask_context msk_ctx;
 static struct db_main *DB;
 static unsigned char *mask_offsets;
-static unsigned int num_keys = 0;
+
 static unsigned int mask_mode = 0;
+static unsigned int benchmark = 1;
 
-
-//OpenCL variables
-cl_mem 	pinned_saved_keys, pinned_bbbs, buffer_out, buffer_keys, buffer_ld_hashes, buffer_outKeyIdx,
-	buffer_cmp_out, buffer_mask_gpu;
 cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
-
-static int have_full_hashes;
 
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
 static int crypt_all(int *pcount, struct db_salt *_salt);
 static char *get_key_self_test(int index);
 static char *get_key(int index);
-
-static struct bitmap_context_mixed *bitmap1;
-static struct bitmap_context_global *bitmap2;
-cl_mem buffer_bitmap1, buffer_bitmap2;
 
 static void release_clobj(void)
 {
@@ -152,9 +152,9 @@ static void release_clobj(void)
 
 		HANDLE_CLERROR(clReleaseMemObject(buffer_ld_hashes), "Release loaded hashes");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), "Release output key indeces");
-		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap1), "Release output key indeces");
-		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap2), "Release output key indeces");
-		HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release output key indeces");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap1), "Release bitmap1");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap2), "Release bitmap2");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release mask");
 	}
 }
 
@@ -162,9 +162,9 @@ static void done(void)
 {
 	release_clobj();
 
-	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel self_test");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel mask mode");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel non-mask mode");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 }
 
@@ -186,6 +186,10 @@ static void init(struct fmt_main *self){
 		global_work_size = atoi(temp);
 	else
 		global_work_size = MAX_KEYS_PER_CRYPT;
+
+	if(global_work_size < 1024) global_work_size = 1024;
+	/* Round off to nearest power of 2 */
+	local_work_size = pow(2, ceil(log(local_work_size)/log(2)));
 
 	crypt_kernel = clCreateKernel( program[ocl_gpu_id], "nt_self_test", &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
@@ -709,7 +713,8 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
-	unsigned int i, multiplier;
+	unsigned int i;
+	static unsigned int multiplier;
 	int key_length_mul_4 = (((max_key_length+1) + 3)/4)*4;
 	static unsigned int flag;
 
@@ -718,9 +723,11 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)
 			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
 		flag = 1;
 	}
+
+	if(mask_mode)
+		*pcount *= multiplier;
 
 	if(loaded_count != (salt->count)) {
 		load_hash(salt);
