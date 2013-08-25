@@ -48,8 +48,8 @@ static cl_uint *partial_hashes, *res_hashes;
 
 cl_mem buffer_ld_hashes, buffer_outKeyIdx, buffer_bitmap1, buffer_bitmap2;
 static unsigned int *loaded_hashes, cmp_out = 0, *outKeyIdx, loaded_count = 0;
-static struct bitmap_context_mixed bitmap1;
-static struct bitmap_context_global bitmap2;
+static struct bitmap_context_mixed *bitmap1;
+static struct bitmap_context_global *bitmap2;
 
 cl_mem buffer_mask_gpu;
 static unsigned int mask_mode = 0;
@@ -146,6 +146,8 @@ static void release_clobj(void)
 		MEM_FREE(loaded_hashes);
 		MEM_FREE(outKeyIdx);
 		MEM_FREE(mask_offsets);
+		MEM_FREE(bitmap1);
+		MEM_FREE(bitmap2);
 
 		HANDLE_CLERROR(clReleaseMemObject(buffer_ld_hashes), "Release loaded hashes");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), "Release output key indeces");
@@ -292,6 +294,8 @@ static void opencl_md4_reset(struct db_main *db) {
 		loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) * 4 + 1)*sizeof(unsigned int));
 		outKeyIdx     = (unsigned int*)mem_calloc((db->password_count) * sizeof(unsigned int) * 2);
 		mask_offsets  = (unsigned char*) mem_calloc(db->format->params.max_keys_per_crypt);
+		bitmap1       = (struct bitmap_context_mixed*)mem_alloc(sizeof(struct bitmap_context_mixed));
+		bitmap2       = (struct bitmap_context_global*)mem_alloc(sizeof(struct bitmap_context_global));
 
 		buffer_ld_hashes = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, ((db->password_count) * 4 + 1)*sizeof(int), NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
@@ -575,14 +579,14 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 	if(loaded_count != (salt->count)) {
 		load_hash(salt);
-		load_bitmap(loaded_count, 0, &bitmap1.bitmap0[0], (BITMAP_SIZE_1 / 8));
-		load_bitmap(loaded_count, 1, &bitmap1.bitmap1[0], (BITMAP_SIZE_1 / 8));
-		load_bitmap(loaded_count, 2, &bitmap1.bitmap2[0], (BITMAP_SIZE_1 / 8));
-		load_bitmap(loaded_count, 3, &bitmap1.bitmap3[0], (BITMAP_SIZE_1 / 8));
-		load_bitmap(loaded_count, 0, &bitmap1.gbitmap0[0], (BITMAP_SIZE_3 / 8));
-		load_hashtable_plus(&bitmap2.hashtable0[0], &bitmap1.loaded_next_hash[0], 2, loaded_count, HASH_TABLE_SIZE_0);
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap1, CL_TRUE, 0, sizeof(struct bitmap_context_mixed), &bitmap1, 0, NULL, NULL ), "Failed Copy data to gpu");
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap2, CL_TRUE, 0, sizeof(struct bitmap_context_global), &bitmap2, 0, NULL, NULL ), "Failed Copy data to gpu");
+		load_bitmap(loaded_count, 0, &bitmap1[0].bitmap0[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 1, &bitmap1[0].bitmap1[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 2, &bitmap1[0].bitmap2[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 3, &bitmap1[0].bitmap3[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 0, &bitmap1[0].gbitmap0[0], (BITMAP_SIZE_3 / 8));
+		load_hashtable_plus(&bitmap2[0].hashtable0[0], &bitmap1[0].loaded_next_hash[0], 2, loaded_count, HASH_TABLE_SIZE_0);
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap1, CL_TRUE, 0, sizeof(struct bitmap_context_mixed), bitmap1, 0, NULL, NULL ), "Failed Copy data to gpu");
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap2, CL_TRUE, 0, sizeof(struct bitmap_context_global), bitmap2, 0, NULL, NULL ), "Failed Copy data to gpu");
 	}
 
 	// copy keys to the device
