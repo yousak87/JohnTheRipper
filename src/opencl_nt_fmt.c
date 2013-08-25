@@ -43,7 +43,7 @@
 #define SALT_SIZE		0
 
 //2^10 * 2^9
-#define MIN_KEYS_PER_CRYPT	1024*2048*4
+#define MIN_KEYS_PER_CRYPT	(1024*2048*4)
 #define MAX_KEYS_PER_CRYPT	MIN_KEYS_PER_CRYPT
 
 static struct fmt_tests tests[] = {
@@ -126,8 +126,9 @@ static int crypt_all(int *pcount, struct db_salt *_salt);
 static char *get_key_self_test(int index);
 static char *get_key(int index);
 
-static struct bitmap_ctx bitmap;
-cl_mem buffer_bitmap;
+static struct bitmap_context_mixed *bitmap1;
+static struct bitmap_context_global *bitmap2;
+cl_mem buffer_bitmap1, buffer_bitmap2;
 
 static void release_clobj(void)
 {
@@ -146,10 +147,13 @@ static void release_clobj(void)
 		MEM_FREE(loaded_hashes);
 		MEM_FREE(outKeyIdx);
 		MEM_FREE(mask_offsets);
+		MEM_FREE(bitmap1);
+		MEM_FREE(bitmap2);
 
 		HANDLE_CLERROR(clReleaseMemObject(buffer_ld_hashes), "Release loaded hashes");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), "Release output key indeces");
-		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap), "Release output key indeces");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap1), "Release output key indeces");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap2), "Release output key indeces");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release output key indeces");
 	}
 }
@@ -414,12 +418,13 @@ static void setKernelArgs(cl_kernel *kernel) {
 		"Error setting argument 1");
 	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_outKeyIdx), (void*) &buffer_outKeyIdx ),
 		"Error setting argument 2");
-	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_bitmap), (void*) &buffer_bitmap ),
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_bitmap1), (void*) &buffer_bitmap1 ),
 		"Error setting argument 3");
+	HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_bitmap2), (void*) &buffer_bitmap2 ),
+		"Error setting argument 4");
 	if(mask_mode)
 		HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu),
-			"Error setting argument 4");
-
+			"Error setting argument 5");
 }
 
 static void opencl_nt_reset(struct db_main *db) {
@@ -430,6 +435,8 @@ static void opencl_nt_reset(struct db_main *db) {
 		loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) * 4 + 1)*sizeof(unsigned int));
 		outKeyIdx     = (unsigned int*)mem_calloc((db->password_count) * sizeof(unsigned int) * 2);
 		mask_offsets  = (unsigned char*) mem_calloc(db->format->params.max_keys_per_crypt);
+		bitmap1       = (struct bitmap_context_mixed*)mem_alloc(sizeof(struct bitmap_context_mixed));
+		bitmap2       = (struct bitmap_context_global*)mem_alloc(sizeof(struct bitmap_context_global));
 
 		buffer_ld_hashes = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, ((db->password_count) * 4 + 1)*sizeof(int), NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
@@ -440,7 +447,10 @@ static void opencl_nt_reset(struct db_main *db) {
 		buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, length, NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer cmp_out\n");
 
-		buffer_bitmap = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_ctx), NULL, &ret_code);
+		buffer_bitmap1 = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_context_mixed), NULL, &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
+
+		buffer_bitmap2 = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_context_global), NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
 
 		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
@@ -501,6 +511,20 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int index, unsi
 		hash = loaded_hashes[index * num_loaded_hashes + i + 1] & (szBmp * 8 - 1);
 		// divide by 32 , harcoded here and correct only for unsigned int
 		bitmap[hash >> 5] |= (1U << (hash & 31));
+	}
+}
+
+static void load_hashtable_plus(unsigned int *hashtable, unsigned int *loaded_next_hash, unsigned int idx, unsigned int num_loaded_hashes, unsigned int szHashTbl) {
+	unsigned int i;
+
+	memset(hashtable, 0xFF, szHashTbl * sizeof(unsigned int));
+	memset(loaded_next_hash, 0xFF, num_loaded_hashes * sizeof(unsigned int));
+
+	for (i = 0; i < num_loaded_hashes; ++i) {
+		unsigned int hash = loaded_hashes[i + idx*num_loaded_hashes + 1] & (szHashTbl - 1);
+		loaded_next_hash[i] = hashtable[hash];
+
+		hashtable[hash] = i;
 	}
 }
 
@@ -700,9 +724,14 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 	if(loaded_count != (salt->count)) {
 		load_hash(salt);
-		load_bitmap(loaded_count, 0, &bitmap.bitmap0[0], (BITMAP_SIZE_1 / 8));
-		load_bitmap(loaded_count, 1, &bitmap.bitmap1[0], (BITMAP_SIZE_1 / 8));
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap, CL_TRUE, 0, sizeof(struct bitmap_ctx), &bitmap, 0, NULL, NULL ), "Failed Copy data to gpu");
+		load_bitmap(loaded_count, 0, &bitmap1[0].bitmap0[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 1, &bitmap1[0].bitmap1[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 2, &bitmap1[0].bitmap2[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 3, &bitmap1[0].bitmap3[0], (BITMAP_SIZE_1 / 8));
+		load_bitmap(loaded_count, 0, &bitmap1[0].gbitmap0[0], (BITMAP_SIZE_3 / 8));
+		load_hashtable_plus(&bitmap2[0].hashtable0[0], &bitmap1[0].loaded_next_hash[0], 2, loaded_count, HASH_TABLE_SIZE_0);
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap1, CL_TRUE, 0, sizeof(struct bitmap_context_mixed), bitmap1, 0, NULL, NULL), "Failed Copy data to gpu");
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_bitmap2, CL_TRUE, 0, sizeof(struct bitmap_context_global), bitmap2, 0, NULL, NULL), "Failed Copy data to gpu");
 	}
 
 	// Fill params. Copy only necesary data
@@ -728,10 +757,7 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	for(i = 0; i < (loaded_count & (~cmp_out)); i++)
 		cmp_out = outKeyIdx[i]?0xffffffff:0;
 
-
 	if(cmp_out) {
-		// Read partial result
-		//HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, sizeof(cl_uint) * loaded_count, bbbs, 0, NULL, NULL), "failed in reading hashes back");
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0, sizeof(cl_uint) * loaded_count * 2, outKeyIdx, 0, NULL, NULL), "failed in reading cracked key indices back");
 		for(i = 0; i < loaded_count; i++) {
 			if(outKeyIdx[i])
