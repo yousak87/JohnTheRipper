@@ -238,6 +238,12 @@ __kernel void nt_om(const __global uint *keys,
 
 	uint hash[4];
 
+	if(gid < num_loaded_hashes)
+		for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++)
+			outKeyIdx[(i*num_keys + gid)] = 0;
+
+	barrier(CLK_GLOBAL_MEM_FENCE);
+
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
 	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
 	__local uint sbitmap2[BITMAP_SIZE_1 >> 5];
@@ -256,11 +262,6 @@ __kernel void nt_om(const __global uint *keys,
 		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
 
 	barrier(CLK_LOCAL_MEM_FENCE);
-
-	if(gid==1)
-		for (i = 0; i < num_loaded_hashes; i++)
-			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
-	barrier(CLK_GLOBAL_MEM_FENCE);
 
 	coalasced_load(nt_buffer, keys, &md4_size, gid, num_keys);
 	nt_crypt(hash, nt_buffer, md4_size);

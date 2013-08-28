@@ -357,9 +357,9 @@ __kernel void sha1_om(__global uint* keys,
 	PUTCHAR_BE(W, len, 0x80);
 	W[15] = len << 3;
 
-	if(gid==1)
-		for (i = 0; i < num_loaded_hashes; i++)
-			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+	if(gid < num_loaded_hashes)
+		for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++)
+			outKeyIdx[(i*num_keys + gid)] = 0;
 	barrier(CLK_GLOBAL_MEM_FENCE);
 
 	sha1_init(output);

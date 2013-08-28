@@ -49,6 +49,10 @@
 	    (a) = rotate((a), (uint)(s)); \
 	    (a) += (b)
 
+#if cpu(DEVICE_INFO)
+#define _CPU
+#endif
+
 /* some constants used below are passed with -D */
 //#define KEY_LENGTH (MD4_PLAINTEXT_LENGTH + 1)
 
@@ -213,6 +217,22 @@ __kernel void md5_self_test(__global const uint *keys, __global const ulong *ind
 	hashes[3 * num_keys + gid] = hash.s3 + 0x10325476;
 }
 
+#ifdef _CPU
+#define LOAD_OUTKEYIDX()	\
+	if(gid==1)		\
+		for (i = 0; i < num_loaded_hashes; i++)	\
+			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;	\
+	barrier(CLK_GLOBAL_MEM_FENCE);
+#else
+#define LOAD_OUTKEYIDX()	\
+	for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {	\
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes] = 0;\
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes + num_loaded_hashes] = 0;\
+	}\
+	barrier(CLK_GLOBAL_MEM_FENCE);
+#endif
+
+
 /* For other modes except mask mode*/
 __kernel void md5_om(__global const uint *keys,
 			    __global const ulong *index,
@@ -230,10 +250,7 @@ __kernel void md5_om(__global const uint *keys,
 	uint num_loaded_hashes = loaded_hashes[0];
 	uint W[16] = { 0 };
 
-	if(gid==1)
-		for (i = 0; i < num_loaded_hashes; i++)
-			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
-	barrier(CLK_GLOBAL_MEM_FENCE);
+	LOAD_OUTKEYIDX();
 
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
 	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
@@ -283,6 +300,7 @@ __kernel void md5_nnn(__global uint *keys,
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
+	uint num_keys = get_global_size(0);
 	ulong base = index[gid];
 	uint len = base & 63;
 	uint W[16] = { 0 };
@@ -386,6 +404,7 @@ __kernel void md5_ccc(__global uint *keys,
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
+	uint num_keys = get_global_size(0);
 	ulong base = index[gid];
 	uint len = base & 63;
 	uint W[16] = { 0 };
@@ -435,6 +454,13 @@ __kernel void md5_ccc(__global uint *keys,
 		for (i = 0; i < num_loaded_hashes; i++)
 			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
 	barrier(CLK_GLOBAL_MEM_FENCE);
+
+	// This does not work, probably due to compiler bug.
+	/*for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {	\
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes] = 0;\
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes + num_loaded_hashes] = 0;\
+	}
+	barrier(CLK_GLOBAL_MEM_FENCE);*/
 
 	keys += base >> 6;
 	for (i = 0; i < (len+3)/4; i++)
@@ -486,6 +512,7 @@ __kernel void md5_cnn(__global uint *keys,
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
+	uint num_keys = get_global_size(0);
 	ulong base = index[gid];
 	uint len = base & 63;
 	uint W[16] = { 0 };

@@ -26,6 +26,10 @@
 #define USE_BITSELECT
 #endif
 
+#if cpu(DEVICE_INFO)
+#define _CPU
+#endif
+
 /* Macros for reading/writing chars from int32's (from rar_kernel.cl) */
 #define GETCHAR(buf, index) (((uchar*)(buf))[(index)])
 #define PUTCHAR(buf, index, val) (buf)[(index)>>2] = ((buf)[(index)>>2] & ~(0xffU << (((index) & 3) << 3))) + ((val) << (((index) & 3) << 3))
@@ -190,6 +194,20 @@ __kernel void md4_self_test(__global const uint *keys, __global const ulong *ind
 	hashes[3 * num_keys + gid] = hash[3] + 0x10325476;
 }
 
+#ifdef _CPU
+#define LOAD_OUTKEYIDX()	\
+	if(gid==1)		\
+		for (i = 0; i < num_loaded_hashes; i++)	\
+			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;	\
+	barrier(CLK_GLOBAL_MEM_FENCE);
+#else
+#define LOAD_OUTKEYIDX()	\
+	if(gid < num_loaded_hashes) \
+		for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) \
+			outKeyIdx[(i*num_keys + gid)] = 0; \
+	barrier(CLK_GLOBAL_MEM_FENCE);
+#endif
+
 __kernel void md4_om(__global const uint *keys,
 			    __global const ulong *index,
 			    __global uint *loaded_hashes,
@@ -227,10 +245,7 @@ __kernel void md4_om(__global const uint *keys,
 
 	barrier(CLK_LOCAL_MEM_FENCE);
 
-	if(gid==1)
-		for (i = 0; i < num_loaded_hashes; i++)
-			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
-	barrier(CLK_GLOBAL_MEM_FENCE);
+	LOAD_OUTKEYIDX();
 
 	keys += base >> 6;
 
