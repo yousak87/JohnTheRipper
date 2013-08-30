@@ -153,7 +153,7 @@ inline void prepare_key(__global uint * key, int length, uint * nt_buffer)
 	nt_buffer[14] = length << 4;
 }
 
-inline void cmp(__global uint *hashes,
+inline void cmp(
 	  __global uint *loaded_hashes,
 	  __local uint *bitmap0,
 	  __local uint *bitmap1,
@@ -165,35 +165,29 @@ inline void cmp(__global uint *hashes,
 
 	uint loaded_hash, i, tmp;
 
-	for(i = 0; i < num_loaded_hashes; i++) {
+	loaded_hash = hash[0] & BITMAP_HASH_1;
+	tmp = (bitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
+	loaded_hash = hash[1] & BITMAP_HASH_1;
+	tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
+	if(tmp) {
 
-		loaded_hash = hash[0] & BITMAP_HASH_1;
-		tmp = (bitmap0[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U ;
-		if(tmp) {
+		for(i = 0; i < num_loaded_hashes; i++) {
 
-			loaded_hash = hash[1] & BITMAP_HASH_1;
-			tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
-			if(tmp) {
+			loaded_hash = loaded_hashes[i + 2 * num_loaded_hashes + 1];
+			if(hash[2] == loaded_hash) {
 
-				loaded_hash = loaded_hashes[i + 2 * num_loaded_hashes + 1];
-				if(hash[2] == loaded_hash) {
+				loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
+				if(hash[3] == loaded_hash) {
 
-					loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
-					if(hash[3] == loaded_hash) {
-
-						hashes[i] = hash[0];
-						hashes[1 * num_loaded_hashes + i] = hash[1];
-						hashes[2 * num_loaded_hashes + i] = hash[2];
-						hashes[3 * num_loaded_hashes + i] = hash[3];
-						outKeyIdx[i] = gid | 0x80000000;
-						outKeyIdx[i + num_loaded_hashes] = keyIdx;
-						barrier(CLK_GLOBAL_MEM_FENCE);
-					}
+					outKeyIdx[i] = gid | 0x80000000;
+					outKeyIdx[i + num_loaded_hashes] = keyIdx;
+					barrier(CLK_GLOBAL_MEM_FENCE);
 				}
 			}
 		}
 	}
- }
+
+}
 
 __kernel void mscash_self_test(__global uint *keys, __global uint *keyIdx, __global uint *salt, __global uint *outBuffer) {
 
@@ -233,7 +227,6 @@ __kernel void mscash_self_test(__global uint *keys, __global uint *keyIdx, __glo
 
 __kernel void mscash(__global uint *keys,
 		     __global uint *keyIdx,
-		     __global uint *outBuffer,
 		     __global uint *outKeyIdx,
 		     __global struct mask_context *msk_ctx,
 		     __global uint *salt,
@@ -319,7 +312,7 @@ __kernel void mscash(__global uint *keys,
 				for(ii = 0; ii < 12; ii++)
 					nt_buffer[ii + 4] = login[ii];
 				md4_crypt(output, nt_buffer);
-				cmp(outBuffer, loaded_hashes, sbitmap0, sbitmap1, output, outKeyIdx, gid, num_loaded_hashes, ctr++);
+				cmp(loaded_hashes, sbitmap0, sbitmap1, output, outKeyIdx, gid, num_loaded_hashes, ctr++);
 			}
 
 			j++;
