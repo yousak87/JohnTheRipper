@@ -346,10 +346,10 @@ static void load_hash(struct db_salt *salt, unsigned int *loaded_hashes, unsigne
 		bin = (unsigned int *)pw -> binary;
 		// Potential segfault if removed
 		if(bin != NULL) {
-			loaded_hashes[i*4 + 1] = bin[0];
-			loaded_hashes[i*4 + 2] = bin[1];
-			loaded_hashes[i*4 + 3] = bin[2];
-			loaded_hashes[i*4 + 4] = bin[3];
+			loaded_hashes[i + 1] = bin[0];
+			loaded_hashes[i + (*loaded_count) + 1] = bin[1];
+			loaded_hashes[i + (*loaded_count) * 2 + 1] = bin[2];
+			loaded_hashes[i + (*loaded_count) * 3 + 1] = bin[3];
 			i++ ;
 		}
 	} while ((pw = pw -> next)) ;
@@ -365,7 +365,7 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int *loaded_has
 	memset(bitmap, 0, szBmp);
 
 	for(i = 0; i < num_loaded_hashes; i++) {
-		hash = loaded_hashes[index + i * 4 + 1] & (szBmp * 8 - 1);
+		hash = loaded_hashes[index * num_loaded_hashes + i + 1] & (szBmp * 8 - 1);
 		// divide by 32 , harcoded here and correct only for unsigned int
 		bitmap[hash >> 5] |= (1U << (hash & 31));
 	}
@@ -579,8 +579,8 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 		"failed in clEnqueWriteBuffer salt");
 
 	// Execute method
-	clEnqueueNDRangeKernel( queue[ocl_gpu_id], crypt_kernel, 1, NULL, &gws, &lws, 0, NULL, NULL);
-	clFinish( queue[ocl_gpu_id] );
+	clEnqueueNDRangeKernel(queue[ocl_gpu_id], crypt_kernel, 1, NULL, &gws, &lws, 0, NULL, NULL);
+	clFinish(queue[ocl_gpu_id]);
 
 	// read back compare results
 	HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, 0, 4 * global_work_size * sizeof(unsigned int), outbuffer, 0, NULL, NULL), "failed in reading cmp data back");

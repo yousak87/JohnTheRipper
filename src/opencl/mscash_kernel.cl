@@ -175,10 +175,10 @@ inline void cmp(__global uint *hashes,
 			tmp &= (bitmap1[loaded_hash >> 5] >> (loaded_hash & 31)) & 1U;
 			if(tmp) {
 
-				loaded_hash = loaded_hashes[i * 4 + 3];
+				loaded_hash = loaded_hashes[i + 2 * num_loaded_hashes + 1];
 				if(hash[2] == loaded_hash) {
 
-					loaded_hash = loaded_hashes[i * 4 + 4];
+					loaded_hash = loaded_hashes[i + 3 * num_loaded_hashes + 1];
 					if(hash[3] == loaded_hash) {
 
 						hashes[i] = hash[0];
