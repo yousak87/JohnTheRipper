@@ -24,6 +24,7 @@
 #define BUFSIZE            	((PLAINTEXT_LENGTH+3)/4*4)
 
 static unsigned int key_idx = 0;
+static unsigned char *mask_offsets;
 
 static unsigned int *saved_plain, *saved_idx, *outbuffer, *outKeyIdx, *current_salt;
 cl_mem 	pinned_saved_keys, pinned_saved_idx, pinned_saved_salt,
@@ -39,8 +40,14 @@ cl_mem *buffer_ld_hashes, *buffer_bitmaps, *buffer_salts;
 static unsigned int cmp_out = 0;
 static unsigned int benchmark = 1;
 static unsigned int keys_changed = 0;
+static unsigned int mask_mode = 0;
+static unsigned int num_keys = 0;
 
 cl_kernel crk_kernel;
+
+static struct mask_context msk_ctx;
+struct db_main *DB;
+cl_mem buffer_mask_gpu;
 
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
 static int crypt_all(int *pcount, struct db_salt *_salt);
@@ -90,12 +97,13 @@ static void done()
 			MEM_FREE(loaded_hashes[i]);
 		}
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), "Release output key indeces");
+		HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release mask");
 		MEM_FREE(loaded_hashes);
 		MEM_FREE(bitmaps);
 		MEM_FREE(loaded_count);
 		MEM_FREE(outKeyIdx);
+		MEM_FREE(mask_offsets);
 	}
-
 }
 
 static void init(struct fmt_main *self)
@@ -103,7 +111,6 @@ static void init(struct fmt_main *self)
 	int argIndex;
 
 	//Allocate memory for hashes and passwords
-	//saved_plain = (unsigned int *) mem_calloc(MAX_KEYS_PER_CRYPT * BUFSIZE);
 	saved_idx = (unsigned int*) mem_calloc(MAX_KEYS_PER_CRYPT * sizeof(unsigned int));
 	outbuffer =
 	    (unsigned int *) mem_alloc(MAX_KEYS_PER_CRYPT * 4 * sizeof(unsigned int));
@@ -139,6 +146,9 @@ static void init(struct fmt_main *self)
 
 	buffer_out  = clCreateBuffer( context[ocl_gpu_id], CL_MEM_WRITE_ONLY , 4 * MAX_KEYS_PER_CRYPT * sizeof(unsigned int), NULL, &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating buffer argument");
+
+	if(options.mask)
+		mask_mode = 1;
 
 	argIndex = 0;
 	HANDLE_CLERROR(clSetKernelArg(crypt_kernel, argIndex++, sizeof(buffer_keys), (void*) &buffer_keys),
@@ -263,7 +273,9 @@ static void reset(struct db_main *db) {
 	if(db != NULL) {
 		int argIndex, pwcount, ctr = 0;
 		struct db_salt *salt = db -> salts;
+		unsigned int length;
 		max_salts = db->salt_count;
+
 
 		outKeyIdx     = (unsigned int*)mem_calloc((db->password_count) * sizeof(unsigned int) * 2);
 		loaded_hashes = (unsigned int **)mem_calloc(max_salts * sizeof(unsigned int *));
@@ -272,6 +284,7 @@ static void reset(struct db_main *db) {
 		buffer_ld_hashes = (cl_mem *)mem_alloc(max_salts * sizeof(cl_mem));
 		buffer_bitmaps = (cl_mem *)mem_alloc(max_salts * sizeof(cl_mem));
 		buffer_salts = (cl_mem *)mem_alloc(max_salts * sizeof(cl_mem));
+		mask_offsets = (unsigned char*) mem_calloc(db->format->params.max_keys_per_crypt);
 
 		do {
 			salt -> sequential_id = ctr++;
@@ -289,8 +302,12 @@ static void reset(struct db_main *db) {
 
 		} while((salt = salt->next));
 
-		buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, (db->password_count) * sizeof(unsigned int) * 2, NULL, &ret_code);
+		length = ((db->format->params.max_keys_per_crypt) > ((db->password_count) * sizeof(unsigned int) * 2)) ? (db->format->params.max_keys_per_crypt) : ((db->password_count) * sizeof(unsigned int) * 2);
+		/* buffer_outKeyIdx is multiplexed for use as mask_offset input and keyIdx output */
+		buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, length, NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer cmp_out\n");
+		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
+		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
 
 		argIndex = 0;
 		HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_keys), (void*) &buffer_keys),
@@ -301,10 +318,14 @@ static void reset(struct db_main *db) {
 		"Error setting argument 2");
 		HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_outKeyIdx), (void*) &buffer_outKeyIdx ),
 		"Error setting argument 3");
+		HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu ),
+		"Error setting argument 4");
 
 		benchmark = 0;
 
-		db->max_int_keys = 0;
+		db->max_int_keys = 26 * 26;
+
+		DB = db;
 
 		db->format->methods.crypt_all = crypt_all;
 		db->format->methods.get_key = get_key;
@@ -350,15 +371,109 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int *loaded_has
 	}
 }
 
+static void check_mask_dcc(struct mask_context *msk_ctx) {
+	int i, j, k ;
+
+	if(msk_ctx -> count > PLAINTEXT_LENGTH) msk_ctx -> count = PLAINTEXT_LENGTH;
+	if(msk_ctx -> count > MASK_RANGES_MAX) {
+		fprintf(stderr, "MASK parameters are too small...Exiting...\n");
+		exit(EXIT_FAILURE);
+
+	}
+
+  /* Assumes msk_ctx -> activeRangePos[] is sorted. Check if any range exceeds nt key limit */
+	for( i = 0; i < msk_ctx->count; i++)
+		if(msk_ctx -> activeRangePos[i] >= PLAINTEXT_LENGTH) {
+			msk_ctx->count = i;
+			break;
+		}
+	j = 0;
+	i = 0;
+	k = 0;
+ /* Append non-active portion to activeRangePos[] for ease of computation inside GPU */
+	while((j <= msk_ctx -> activeRangePos[k]) && (k < msk_ctx -> count)) {
+		if(j == msk_ctx -> activeRangePos[k]) {
+			k++;
+			j++;
+			continue;
+		}
+		msk_ctx -> activeRangePos[msk_ctx -> count + i] = j;
+		i++;
+		j++;
+	}
+	while ((i+msk_ctx->count) < MASK_RANGES_MAX) {
+		msk_ctx -> activeRangePos[msk_ctx -> count + i] = j;
+		i++;
+		j++;
+	}
+
+	for(i = msk_ctx->count; i < MASK_RANGES_MAX; i++)
+		msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count = 0;
+
+	/* Sort active ranges in descending order of charchter count */
+	if(msk_ctx->ranges[msk_ctx -> activeRangePos[0]].count < msk_ctx->ranges[msk_ctx -> activeRangePos[1]].count) {
+		i = msk_ctx -> activeRangePos[1];
+		msk_ctx -> activeRangePos[1] = msk_ctx -> activeRangePos[0];
+		msk_ctx -> activeRangePos[0] = i;
+	}
+
+	if(msk_ctx->ranges[msk_ctx -> activeRangePos[0]].count < msk_ctx->ranges[msk_ctx -> activeRangePos[2]].count) {
+		i = msk_ctx -> activeRangePos[2];
+		msk_ctx -> activeRangePos[2] = msk_ctx -> activeRangePos[0];
+		msk_ctx -> activeRangePos[0] = i;
+	}
+
+	if(msk_ctx->ranges[msk_ctx -> activeRangePos[1]].count < msk_ctx->ranges[msk_ctx -> activeRangePos[2]].count) {
+		i = msk_ctx -> activeRangePos[2];
+		msk_ctx -> activeRangePos[2] = msk_ctx -> activeRangePos[1];
+		msk_ctx -> activeRangePos[1] = i;
+	}
+}
+
+static void load_mask(struct db_main *db) {
+	int i, j;
+
+	if (!db->msk_ctx) {
+		fprintf(stderr, "No given mask.Exiting...\n");
+		exit(EXIT_FAILURE);
+	}
+	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
+	check_mask_dcc(&msk_ctx);
+
+	for(i = 0; i < MASK_RANGES_MAX; i++)
+	    printf("%d ",msk_ctx.activeRangePos[i]);
+	printf("\n");
+	for(i = 0; i < MASK_RANGES_MAX; i++)
+	    printf("%d ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].count);
+	printf("\n");
+
+	/*
+	for(i = 0; i < msk_ctx.count; i++)
+	  printf(" %d ", msk_ctx.activeRangePos[i]);*/
+	for(i = 0; i < msk_ctx.count; i++){
+			for(j = 0; j < msk_ctx.ranges[msk_ctx.activeRangePos[i]].count; j++)
+				printf("%c ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].chars[j]);
+			printf("\n");
+			//checkRange(&msk_ctx, msk_ctx.activeRangePos[i]) ;
+			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
+			printf("\n");
+	}
+
+	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
+}
+
 static void clear_keys(void)
 {
 	key_idx = 0;
+	num_keys = 0;
 }
 
 static void set_key(char *_key, int index)
 {
 	const ARCH_WORD_32 *key = (ARCH_WORD_32*)_key;
 	int len = strlen(_key);
+
+	//fprintf(stderr, "%s\n",_key);
 
 	saved_idx[index] = (key_idx << 6) | len;
 
@@ -370,6 +485,7 @@ static void set_key(char *_key, int index)
 		saved_plain[key_idx++] = *key & (0xffffffffU >> (32 - (len << 3)));
 
 	keys_changed = 1;
+	num_keys++;
 }
 
 static char *get_key_self_test(int index)
@@ -384,20 +500,51 @@ static char *get_key_self_test(int index)
 	return out;
 }
 
+static void passgen(int ctr, int offset, char *key) {
+	int i, j, k;
+
+	offset = msk_ctx.flg_wrd ? offset : 0;
+
+	i =  ctr % msk_ctx.ranges[msk_ctx.activeRangePos[0]].count;
+	key[msk_ctx.activeRangePos[0] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[0]].chars[i];
+
+	if (msk_ctx.ranges[msk_ctx.activeRangePos[1]].count) {
+		j = (ctr / msk_ctx.ranges[msk_ctx.activeRangePos[0]].count) % msk_ctx.ranges[msk_ctx.activeRangePos[1]].count;
+		key[msk_ctx.activeRangePos[1] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[1]].chars[j];
+	}
+	if (msk_ctx.ranges[msk_ctx.activeRangePos[2]].count) {
+		k = (ctr / (msk_ctx.ranges[msk_ctx.activeRangePos[0]].count * msk_ctx.ranges[msk_ctx.activeRangePos[1]].count)) % msk_ctx.ranges[msk_ctx.activeRangePos[2]].count;
+		key[msk_ctx.activeRangePos[2] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[2]].chars[k];
+	}
+}
+
 static char *get_key(int index)
 {
 	static char out[PLAINTEXT_LENGTH + 1];
 	char *key;
-	int i, len;
+	int i, len, ctr = 0, mask_offset = 0, flag = 0;
 
-	if(index < loaded_count[sequential_id])
-		index = outKeyIdx[index];
+	if((index < loaded_count[sequential_id]) && cmp_out) {
+		ctr = outKeyIdx[index + loaded_count[sequential_id]];
+		/* outKeyIdx contains all zero when no new passwords are cracked.
+		 * Hence during status checks even if index is less than loaded count
+		 * correct range of passwords is displayed.
+		 */
+		index = outKeyIdx[index] & 0x7ffffff;
+		mask_offset = mask_offsets[index];
+		flag = 1;
+	}
 
+	index = (index > num_keys)? (num_keys?num_keys-1:0): index;
 	len = saved_idx[index] & 63;
 	key = (char*)&saved_plain[saved_idx[index] >> 6];
 
 	for (i = 0; i < len; i++)
 		out[i] = *key++;
+
+	if(cmp_out && flag && mask_mode)
+		passgen(ctr, mask_offset, out);
+
 	out[i] = 0;
 	return out;
 }
@@ -433,9 +580,19 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 
 static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 
-	int  i;
+	int  i, multiplier;
+	static unsigned int flag;
 	size_t gws = global_work_size;
 	size_t lws = LWS;
+
+	if(!flag) {
+		load_mask(DB);
+		multiplier = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
+		flag = 1;
+	}
 
 	sequential_id = currentsalt -> sequential_id;
 
@@ -454,12 +611,12 @@ static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 						    "Failed Copy data to gpu");
 	}
 
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, 4, sizeof(buffer_salts[sequential_id]), (void*) &buffer_salts[sequential_id]),
-	"Error setting argument 4");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, 5, sizeof(buffer_ld_hashes[sequential_id]), (void*) &buffer_ld_hashes[sequential_id]),
+	HANDLE_CLERROR(clSetKernelArg(crk_kernel, 5, sizeof(buffer_salts[sequential_id]), (void*) &buffer_salts[sequential_id]),
 	"Error setting argument 5");
-	HANDLE_CLERROR(clSetKernelArg(crk_kernel, 6, sizeof(buffer_bitmaps[sequential_id]), (void*) &buffer_bitmaps[sequential_id]),
+	HANDLE_CLERROR(clSetKernelArg(crk_kernel, 6, sizeof(buffer_ld_hashes[sequential_id]), (void*) &buffer_ld_hashes[sequential_id]),
 	"Error setting argument 6");
+	HANDLE_CLERROR(clSetKernelArg(crk_kernel, 7, sizeof(buffer_bitmaps[sequential_id]), (void*) &buffer_bitmaps[sequential_id]),
+	"Error setting argument 7");
 
 	if(keys_changed) {
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0,
@@ -468,8 +625,14 @@ static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0,
 			4 * key_idx, saved_plain, 0, NULL, NULL),
 			"failed in clEnqueWriteBuffer buffer_idx");
+
 		keys_changed = 0;
 	}
+
+	if(msk_ctx.flg_wrd)
+			HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0,
+				(DB->format->params.max_keys_per_crypt), mask_offset_buffer, 0, NULL, NULL),
+				"failed in clEnqueWriteBuffer buffer_outKeyIdx");
 
 	// Execute method
 	clEnqueueNDRangeKernel( queue[ocl_gpu_id], crk_kernel, 1, NULL, &gws, &lws, 0, NULL, NULL);
@@ -491,6 +654,9 @@ static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_outKeyIdx,
 						   CL_TRUE, 0, sizeof(cl_uint) * loaded_count[sequential_id] * 2,
 						   outKeyIdx, 0, NULL, NULL), "failed in reading cracked key indices back");
+		if(msk_ctx.flg_wrd)
+			memcpy(mask_offsets, mask_offset_buffer, (DB->format->params.max_keys_per_crypt));
+
 		return loaded_count[sequential_id];
 	}
 
