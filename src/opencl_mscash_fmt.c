@@ -43,7 +43,7 @@ static unsigned int keys_changed = 0;
 static unsigned int mask_mode = 0;
 static unsigned int num_keys = 0;
 
-cl_kernel crk_kernel;
+cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
 
 static struct mask_context msk_ctx;
 struct db_main *DB;
@@ -85,7 +85,8 @@ static void done()
 	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_salt), "Release pinned saved salt");
 	HANDLE_CLERROR(clReleaseMemObject(buffer_out), "Release mem out");
 	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel mask mode");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel other modes");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 
 	if(!benchmark) {
@@ -120,7 +121,10 @@ static void init(struct fmt_main *self)
 	crypt_kernel = clCreateKernel( program[ocl_gpu_id], "mscash_self_test", &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
 
-	crk_kernel = clCreateKernel( program[ocl_gpu_id], "mscash", &ret_code );
+	crk_kernel_mm = clCreateKernel( program[ocl_gpu_id], "mscash_mm", &ret_code );
+	HANDLE_CLERROR(ret_code,"Error creating kernel");
+
+	crk_kernel_om = clCreateKernel( program[ocl_gpu_id], "mscash_om", &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
 
 	pinned_saved_keys = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, BUFSIZE * MAX_KEYS_PER_CRYPT, NULL, &ret_code);
@@ -309,6 +313,14 @@ static void reset(struct db_main *db) {
 		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
 
+		if(mask_mode) {
+			crk_kernel = crk_kernel_mm;
+			db->max_int_keys = 26 * 26;
+			DB = db;
+		}
+		else
+			crk_kernel = crk_kernel_om;
+
 		argIndex = 0;
 		HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_keys), (void*) &buffer_keys),
 		"Error setting argument 0");
@@ -320,10 +332,6 @@ static void reset(struct db_main *db) {
 		"Error setting argument 3");
 
 		benchmark = 0;
-
-		db->max_int_keys = 26 * 26;
-
-		DB = db;
 
 		db->format->methods.crypt_all = crypt_all;
 		db->format->methods.get_key = get_key;
@@ -593,7 +601,7 @@ static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 	size_t gws = global_work_size;
 	size_t lws = LWS;
 
-	if(!flag) {
+	if(!flag && mask_mode) {
 		load_mask(DB);
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)

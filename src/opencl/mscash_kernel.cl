@@ -225,7 +225,60 @@ __kernel void mscash_self_test(__global uint *keys, __global uint *keyIdx, __glo
 	outBuffer[gid + 3 * numkeys] = output[3];
 }
 
-__kernel void mscash(__global uint *keys,
+__kernel void mscash_om(__global uint *keys,
+		     __global uint *keyIdx,
+		     __global uint *outKeyIdx,
+		     __global struct mask_context *msk_ctx,
+		     __global uint *salt,
+		     __global uint *loaded_hashes,
+		     __global struct bitmap_ctx *bitmap) {
+
+	int gid = get_global_id(0), i;
+	int lid = get_local_id(0);
+	int numkeys = get_global_size(0);
+	uint nt_buffer[16] = { 0 };
+	uint output[4] = { 0 };
+	uint base = keyIdx[gid];
+	uint num_loaded_hashes = loaded_hashes[0];
+	uint passwordlength = base & 63;
+
+	keys += base >> 6;
+
+	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
+	__local uint login[12];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap0[i*LWS + lid] = bitmap[0].bitmap0[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap1[i*LWS + lid] = bitmap[0].bitmap1[i*LWS + lid];
+
+	if(!lid)
+		for(i = 0; i < 12; i++)
+			login[i] = salt[i];
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	if(gid==1)
+		for (i = 0; i < num_loaded_hashes; i++)
+			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+	barrier(CLK_GLOBAL_MEM_FENCE);
+
+	prepare_key(keys, passwordlength, nt_buffer);
+	md4_crypt(output, nt_buffer);
+	nt_buffer[0] = output[0];
+	nt_buffer[1] = output[1];
+	nt_buffer[2] = output[2];
+	nt_buffer[3] = output[3];
+
+	for(i = 0; i < 12; i++)
+		nt_buffer[i + 4] = login[i];
+	md4_crypt(output, nt_buffer);
+
+	cmp(loaded_hashes, sbitmap0, sbitmap1, output, outKeyIdx, gid, num_loaded_hashes, 0);
+}
+
+__kernel void mscash_mm(__global uint *keys,
 		     __global uint *keyIdx,
 		     __global uint *outKeyIdx,
 		     __global struct mask_context *msk_ctx,
