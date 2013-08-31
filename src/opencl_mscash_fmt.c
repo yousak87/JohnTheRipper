@@ -23,10 +23,11 @@
 #define BENCHMARK_LENGTH	0
 #define BUFSIZE            	((PLAINTEXT_LENGTH+3)/4*4)
 
-static unsigned int key_idx = 0;
+static uint64_t key_idx = 0;
 static unsigned char *mask_offsets;
 
-static unsigned int *saved_plain, *saved_idx, *outbuffer, *outKeyIdx, *current_salt;
+static unsigned int *saved_plain, *outbuffer, *outKeyIdx, *current_salt;
+static uint64_t *saved_idx;
 cl_mem 	pinned_saved_keys, pinned_saved_idx, pinned_saved_salt,
 	buffer_keys, buffer_idx, buffer_salt, buffer_out,
 	buffer_outKeyIdx;
@@ -117,7 +118,6 @@ static void init(struct fmt_main *self)
 	int argIndex;
 
 	//Allocate memory for hashes and passwords
-	saved_idx = (unsigned int*) mem_calloc(MAX_KEYS_PER_CRYPT * sizeof(unsigned int));
 	outbuffer =
 	    (unsigned int *) mem_alloc(MAX_KEYS_PER_CRYPT * 4 * sizeof(unsigned int));
 
@@ -139,11 +139,11 @@ static void init(struct fmt_main *self)
 	buffer_keys = clCreateBuffer( context[ocl_gpu_id], CL_MEM_READ_ONLY, BUFSIZE * MAX_KEYS_PER_CRYPT, NULL, &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating buffer argument");
 
-	pinned_saved_idx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, sizeof(unsigned int) * MAX_KEYS_PER_CRYPT, NULL, &ret_code);
+	pinned_saved_idx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, sizeof(uint64_t) * MAX_KEYS_PER_CRYPT, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating page-locked memory pinned_saved_idx");
-	saved_idx = clEnqueueMapBuffer(queue[ocl_gpu_id], pinned_saved_idx, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, sizeof(unsigned int) * MAX_KEYS_PER_CRYPT, 0, NULL, NULL, &ret_code);
+	saved_idx = clEnqueueMapBuffer(queue[ocl_gpu_id], pinned_saved_idx, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, sizeof(uint64_t) * MAX_KEYS_PER_CRYPT, 0, NULL, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error mapping page-locked memory saved_idx");
-	buffer_idx = clCreateBuffer( context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(unsigned int) * MAX_KEYS_PER_CRYPT, NULL, &ret_code );
+	buffer_idx = clCreateBuffer( context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(uint64_t) * MAX_KEYS_PER_CRYPT, NULL, &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating buffer argument");
 
 	pinned_saved_salt = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, sizeof(unsigned int) * 12, NULL, &ret_code);
@@ -603,7 +603,7 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 
 	if (keys_changed) {
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0,
-			sizeof(unsigned int) * global_work_size, saved_idx, 0, NULL, NULL),
+			sizeof(uint64_t) * global_work_size, saved_idx, 0, NULL, NULL),
 			"failed in clEnqueWriteBuffer buffer_idx");
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0,
 			4 * key_idx, saved_plain, 0, NULL, NULL),
@@ -676,7 +676,7 @@ static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 
 	if(keys_changed) {
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0,
-			sizeof(unsigned int) * global_work_size, saved_idx, 0, NULL, NULL),
+			sizeof(uint64_t) * global_work_size, saved_idx, 0, NULL, NULL),
 			"failed in clEnqueWriteBuffer buffer_idx");
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0,
 			4 * key_idx, saved_plain, 0, NULL, NULL),

@@ -201,14 +201,14 @@ inline void cmp(
 
 }
 
-__kernel void mscash_self_test(__global uint *keys, __global uint *keyIdx, __global uint *salt, __global uint *outBuffer) {
+__kernel void mscash_self_test(__global uint *keys, __global ulong *keyIdx, __global uint *salt, __global uint *outBuffer) {
 
 	int gid = get_global_id(0), i;
 	int lid = get_local_id(0);
 	int numkeys = get_global_size(0);
 	uint nt_buffer[16] = { 0 };
 	uint output[4] = { 0 };
-	uint base = keyIdx[gid];
+	ulong base = keyIdx[gid];
 	uint passwordlength = base & 63;
 
 	keys += base >> 6;
@@ -238,7 +238,7 @@ __kernel void mscash_self_test(__global uint *keys, __global uint *keyIdx, __glo
 }
 
 __kernel void mscash_om(__global uint *keys,
-		     __global uint *keyIdx,
+		     __global ulong *keyIdx,
 		     __global uint *outKeyIdx,
 		     __global struct mask_context *msk_ctx,
 		     __global uint *salt,
@@ -251,7 +251,7 @@ __kernel void mscash_om(__global uint *keys,
 	int numkeys = get_global_size(0);
 	uint nt_buffer[16] = { 0 };
 	uint output[4] = { 0 };
-	uint base = keyIdx[gid];
+	ulong base = keyIdx[gid];
 	uint num_loaded_hashes = loaded_hashes[0];
 	uint passwordlength = base & 63;
 
@@ -302,7 +302,7 @@ __kernel void mscash_om(__global uint *keys,
 }
 
 __kernel void mscash_mm(__global uint *keys,
-		     __global uint *keyIdx,
+		     __global ulong *keyIdx,
 		     __global uint *outKeyIdx,
 		     __global struct mask_context *msk_ctx,
 		     __global uint *salt,
@@ -316,7 +316,7 @@ __kernel void mscash_mm(__global uint *keys,
 	uint nt_buffer[16] = { 0 };
 	uint restore[16] = { 0 };
 	uint output[4] = { 0 };
-	uint base = keyIdx[gid];
+	ulong base = keyIdx[gid];
 	uint passwordlength = base & 63;
 	uint num_loaded_hashes = loaded_hashes[0];
 	uchar activeRangePos[3], rangeNumChars[3];
