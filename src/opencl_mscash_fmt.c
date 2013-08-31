@@ -22,6 +22,7 @@
 #define BENCHMARK_COMMENT	""
 #define BENCHMARK_LENGTH	0
 #define BUFSIZE            	((PLAINTEXT_LENGTH+3)/4*4)
+#define OCL_CONFIG              "mscash"
 
 static uint64_t key_idx = 0;
 static unsigned char *mask_offsets;
@@ -172,8 +173,20 @@ static void init(struct fmt_main *self)
 	self->methods.crypt_all = crypt_all_self_test;
 	self->methods.get_key = get_key_self_test;
 
-	global_work_size = MAX_KEYS_PER_CRYPT;
+	/* Read LWS/GWS prefs from config or environment */
+	opencl_get_user_preferences(OCL_CONFIG);
 
+	if (!global_work_size)
+		global_work_size = MAX_KEYS_PER_CRYPT;
+
+	if (!local_work_size)
+		local_work_size = LWS;
+
+	self->params.min_keys_per_crypt = local_work_size;
+	self->params.max_keys_per_crypt = global_work_size;
+
+	if (options.verbosity > 2)
+		fprintf(stderr, "Local worksize (LWS) %d, Global worksize (GWS) %d\n", (int)local_work_size, (int)global_work_size);
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -599,7 +612,7 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 {
 	int count = *pcount;
 	size_t gws = global_work_size;
-	size_t lws = 64;
+	size_t lws = local_work_size;
 
 	if (keys_changed) {
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0,
@@ -629,7 +642,7 @@ static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 	int  i, multiplier;
 	static unsigned int flag;
 	size_t gws = global_work_size;
-	size_t lws = LWS;
+	size_t lws = local_work_size;
 
 	if(!flag && mask_mode) {
 		load_mask(DB);
