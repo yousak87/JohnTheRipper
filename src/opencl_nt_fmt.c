@@ -47,6 +47,8 @@
 #define MIN_KEYS_PER_CRYPT	(1024*2048*2)
 #define MAX_KEYS_PER_CRYPT	MIN_KEYS_PER_CRYPT
 
+#define OCL_CONFIG		"nt"
+
 static struct fmt_tests tests[] = {
 	{"$NT$b7e4b9022cd45f275334bbdb83bb5be5", "John the Ripper"},
 	{"$NT$8bd6e4fb88e01009818749c5443ea712", "\xFC"},         // German u-diaeresis in ISO-8859-1
@@ -172,19 +174,17 @@ static void done(void)
 
 static void init(struct fmt_main *self){
 	int argIndex = 0;
-	char *temp;
 	cl_ulong maxsize;
 
 	opencl_init("$JOHN/kernels/nt_kernel.cl", ocl_gpu_id, NULL);
 
-	if ((temp = getenv("LWS")))
-		local_work_size = atoi(temp);
-	else
+	/* Read LWS/GWS prefs from config or environment */
+	opencl_get_user_preferences(OCL_CONFIG);
+
+	if (!local_work_size)
 		local_work_size = cpu(device_info[ocl_gpu_id]) ? 1 : LWS;
 
-	if ((temp = getenv("GWS")))
-		global_work_size = atoi(temp);
-	else
+	if (!global_work_size)
 		global_work_size = MAX_KEYS_PER_CRYPT;
 
 	if(global_work_size < 1024) global_work_size = 1024;

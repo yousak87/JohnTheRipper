@@ -179,7 +179,6 @@ static void init(struct fmt_main *self)
 	crk_kernel_om = clCreateKernel(program[ocl_gpu_id], "md4_om", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
-	local_work_size = global_work_size = 0;
 	opencl_get_user_preferences(CONFIG_NAME);
 
 	/* Round off to nearest power of 2 */
