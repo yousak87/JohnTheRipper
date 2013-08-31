@@ -23,6 +23,7 @@
 #define BENCHMARK_LENGTH	0
 #define BUFSIZE            	((PLAINTEXT_LENGTH+3)/4*4)
 #define OCL_CONFIG              "mscash"
+#define MSCASH_DEBUG		0
 
 static uint64_t key_idx = 0;
 static unsigned char *mask_offsets;
@@ -41,7 +42,7 @@ static struct bitmap_context_global *bitmaps2;
 cl_mem *buffer_ld_hashes, *buffer_bitmaps1, *buffer_bitmaps2, *buffer_salts;
 
 static unsigned int cmp_out = 0;
-static unsigned int benchmark = 1;
+static unsigned int self_test = 1;
 static unsigned int keys_changed = 0;
 static unsigned int mask_mode = 0;
 static unsigned int num_keys = 0;
@@ -92,7 +93,7 @@ static void done()
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel other modes");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 
-	if(!benchmark) {
+	if(!self_test) {
 		int i;
 		for(i = 0; i < max_salts; i++) {
 			HANDLE_CLERROR(clReleaseMemObject(buffer_ld_hashes[i]), "Release loaded hashes");
@@ -157,8 +158,10 @@ static void init(struct fmt_main *self)
 	buffer_out  = clCreateBuffer(context[ocl_gpu_id], CL_MEM_WRITE_ONLY , 4 * MAX_KEYS_PER_CRYPT * sizeof(unsigned int), NULL, &ret_code);
 	HANDLE_CLERROR(ret_code,"Error creating buffer argument");
 
-	if(options.mask)
+	if(options.mask) {
 		mask_mode = 1;
+		local_work_size = LWS;
+	}
 
 	argIndex = 0;
 	HANDLE_CLERROR(clSetKernelArg(crypt_kernel, argIndex++, sizeof(buffer_keys), (void*) &buffer_keys),
@@ -353,7 +356,7 @@ static void reset(struct db_main *db) {
 		HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu ),
 		"Error setting argument 3");
 
-		benchmark = 0;
+		self_test = 0;
 
 		db->format->methods.crypt_all = crypt_all;
 		db->format->methods.get_key = get_key;
@@ -401,7 +404,7 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int *loaded_has
 
 static void load_hashtable_plus(unsigned int *hashtable, unsigned int *loaded_next_hash, unsigned int idx, unsigned int num_loaded_hashes, unsigned int szHashTbl) {
 	unsigned int i;
-#if RAWMD5_DEBUG
+#if MSCASH_DEBUG
 	unsigned int counter = 0;
 #endif
 	memset(hashtable, 0xFF, szHashTbl * sizeof(unsigned int));
@@ -410,12 +413,12 @@ static void load_hashtable_plus(unsigned int *hashtable, unsigned int *loaded_ne
 	for (i = 0; i < num_loaded_hashes; ++i) {
 		unsigned int hash = loaded_hashes[sequential_id][i + idx*num_loaded_hashes + 1] & (szHashTbl - 1);
 		loaded_next_hash[i] = hashtable[hash];
-#if RAWMD5_DEBUG
+#if MSCASH_DEBUG
 		if(!(hashtable[hash]^0xFFFFFFFF)) counter++;
 #endif
 		hashtable[hash] = i;
 	}
-#if RAWMD5_DEBUG
+#if MSCASH_DEBUG
 	fprintf(stderr, "Hash Table Effectiveness:%lf%%\n", ((double)counter/(double)num_loaded_hashes)*100);
 #endif
 }
@@ -490,7 +493,7 @@ static void check_mask_dcc(struct mask_context *msk_ctx) {
 }
 
 static void load_mask(struct db_main *db) {
-	int i, j;
+
 
 	if (!db->msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
@@ -499,6 +502,8 @@ static void load_mask(struct db_main *db) {
 	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
 	check_mask_dcc(&msk_ctx);
 
+#if MSCASH_DEBUG
+	int i, j;
 	for(i = 0; i < MASK_RANGES_MAX; i++)
 	    printf("%d ",msk_ctx.activeRangePos[i]);
 	printf("\n");
@@ -517,6 +522,7 @@ static void load_mask(struct db_main *db) {
 			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
 			printf("\n");
 	}
+#endif
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
@@ -639,8 +645,8 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 
 static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 
-	int  i, multiplier;
-	static unsigned int flag;
+	int  i;
+	static unsigned int flag, multiplier;
 	size_t gws = global_work_size;
 	size_t lws = local_work_size;
 
@@ -649,9 +655,13 @@ static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)
 			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+#if MSCASH_DEBUG
 		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
+#endif
 		flag = 1;
 	}
+	if(mask_mode)
+		*pcount *= multiplier;
 
 	sequential_id = currentsalt -> sequential_id;
 
@@ -773,7 +783,7 @@ static int cmp_all(void *binary, int count)
 {
 	unsigned int i, b = ((unsigned int *) binary)[0];
 
-	if(!benchmark) return 1;
+	if(!self_test) return 1;
 
 	for (i = 0; i < count; i++)
 		if (b == outbuffer[i])
@@ -793,8 +803,8 @@ static int cmp_one(void *binary, int index)
 static int cmp_exact(char *source, int index)
 {
 	unsigned int *t = (unsigned int *) binary(source);
-	unsigned int num = benchmark ? global_work_size: loaded_count[sequential_id];
-	if(benchmark){
+	unsigned int num = self_test ? global_work_size: loaded_count[sequential_id];
+	if(self_test){
 		if (t[1]!=outbuffer[index + num])
 			return 0;
 		if (t[2]!=outbuffer[2 * num + index])
