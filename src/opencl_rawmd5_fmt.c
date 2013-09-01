@@ -71,7 +71,7 @@ static unsigned int mask_mode = 0;
 #define MIN_KEYS_PER_CRYPT      1024
 #define MAX_KEYS_PER_CRYPT      (1024 * 2048 * 4)
 
-#define CONFIG_NAME             "rawmd5"
+#define OCL_CONFIG             "rawmd5"
 #define STEP                    65536
 
 static int have_full_hashes;
@@ -189,7 +189,8 @@ static void init(struct fmt_main *self)
 	crk_kernel_cnn = clCreateKernel(program[ocl_gpu_id], "md5_cnn", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
-	opencl_get_user_preferences(CONFIG_NAME);
+	/* Read LWS/GWS prefs from config or environment */
+	opencl_get_user_preferences(OCL_CONFIG);
 
 	/* Round off to nearest power of 2 */
 	if(local_work_size)
