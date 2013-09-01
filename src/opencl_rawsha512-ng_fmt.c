@@ -808,6 +808,7 @@ struct fmt_main fmt_opencl_xsha512_ng = {
 		SALT_ALIGN_X,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
+		0,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE,
 		x_tests
 	}, {
