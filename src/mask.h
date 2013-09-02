@@ -21,6 +21,7 @@
  * loader.h here because that would be a circular dependency.
  */
 struct db_main;
+struct fmt_main;
 
 extern unsigned char *mask_offset_buffer;
 
@@ -28,5 +29,10 @@ extern unsigned char *mask_offset_buffer;
  * Runs the mask mode cracker.
  */
 extern void do_mask_crack(struct db_main *db, char *mask, char *wordlist);
+
+/*
+ *  Initialize mask mode
+ */
+extern void mask_process(struct fmt_main *fmt, char *mask, unsigned char flg_wrd);
 
 #endif

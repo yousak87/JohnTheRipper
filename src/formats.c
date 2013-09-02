@@ -54,9 +54,11 @@ void fmt_register(struct fmt_main *format)
 void fmt_init(struct fmt_main *format)
 {
 	if (!format->private.initialized) {
+	  	format->private.msk_ctx =
+			(struct mask_context *)mem_alloc(sizeof(struct mask_context));
+		if (options.mask)
+			mask_process(format, options.mask, (options.wordlist!=NULL));
 		format->methods.init(format);
-		format->private.msk_ctx =
-		(struct mask_context *)mem_alloc(sizeof(struct mask_context));
 		format->private.initialized = 1;
 	}
 #ifndef BENCH_BUILD

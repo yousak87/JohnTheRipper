@@ -445,7 +445,7 @@ void DES_bs_select_device(struct fmt_main *fmt)
 
 	opencl_prepare_dev(ocl_gpu_id);
 	opencl_read_source("$JOHN/kernels/DES_bs_kernel_0.cl") ;
-	opencl_build(ocl_gpu_id, "-cl-opt-disable -fno-bin-amdil -fno-bin-source -fbin-exe", 0, NULL, 1);
+	opencl_build(ocl_gpu_id, "-fno-bin-amdil -fno-bin-source -fbin-exe", 0, NULL, 1);
 
 	crk_kernel_mm = clCreateKernel(program[ocl_gpu_id], "DES_bs_25_mm", &ret_code) ;
 	HANDLE_CLERROR(ret_code,"Error creating kernel DES_bs_25_mm");

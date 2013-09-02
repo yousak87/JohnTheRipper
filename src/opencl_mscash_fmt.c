@@ -46,15 +46,17 @@ static unsigned int self_test = 1;
 static unsigned int keys_changed = 0;
 static unsigned int mask_mode = 0;
 static unsigned int num_keys = 0;
+static unsigned int multiplier = 1;
 
 cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
+static struct db_main *DB;
 
 static struct mask_context msk_ctx;
-struct db_main *DB;
 cl_mem buffer_mask_gpu;
 
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
 static int crypt_all(int *pcount, struct db_salt *_salt);
+static void load_mask(struct fmt_main *fmt);
 static char *get_key_self_test(int index);
 static char *get_key(int index);
 
@@ -158,9 +160,21 @@ static void init(struct fmt_main *self)
 	buffer_out  = clCreateBuffer(context[ocl_gpu_id], CL_MEM_WRITE_ONLY , 4 * MAX_KEYS_PER_CRYPT * sizeof(unsigned int), NULL, &ret_code);
 	HANDLE_CLERROR(ret_code,"Error creating buffer argument");
 
+	buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
+
 	if(options.mask) {
+		int i;
 		mask_mode = 1;
 		local_work_size = LWS;
+
+		load_mask(self);
+		multiplier = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+#if MSCASH_DEBUG
+		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
+#endif
 	}
 
 	argIndex = 0;
@@ -301,7 +315,6 @@ static void reset(struct db_main *db) {
 		unsigned int length;
 		max_salts = db->salt_count;
 
-
 		outKeyIdx     = (unsigned int*)mem_calloc((db->password_count) * sizeof(unsigned int) * 2);
 		loaded_hashes = (unsigned int **)mem_calloc(max_salts * sizeof(unsigned int *));
 		loaded_count = (unsigned int*)mem_calloc(max_salts * sizeof(unsigned int));
@@ -335,12 +348,9 @@ static void reset(struct db_main *db) {
 		/* buffer_outKeyIdx is multiplexed for use as mask_offset input and keyIdx output */
 		buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, length, NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer cmp_out\n");
-		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
-		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
 
-		if(mask_mode) {
+		if (mask_mode) {
 			crk_kernel = crk_kernel_mm;
-			//db->max_int_keys = 26 * 26;
 			DB = db;
 		}
 		else
@@ -482,7 +492,7 @@ static void check_mask_dcc(struct mask_context *msk_ctx) {
 	}
 	/* Consecutive charchters in ranges that have all the charchters consective are
 	 * arranged in ascending order. This is to make password generation on host and device
-	 * match each other for md5_ccc and md5_cnn kernels*/
+	 * match each other for md5_ccc and md5_cnn kernels. */
 	for( i = 0; i < msk_ctx->count; i++)
 		if(msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start != 0) {
 			for (j = 0; j < msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count; j++)
@@ -492,13 +502,13 @@ static void check_mask_dcc(struct mask_context *msk_ctx) {
 		}
 }
 
-static void load_mask(struct db_main *db) {
+static void load_mask(struct fmt_main *fmt) {
 
-	if (!db->format->private.msk_ctx) {
+	if (!fmt->private.msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(&msk_ctx, db->format->private.msk_ctx, sizeof(struct mask_context));
+	memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_dcc(&msk_ctx);
 
 #if MSCASH_DEBUG
@@ -522,7 +532,6 @@ static void load_mask(struct db_main *db) {
 			printf("\n");
 	}
 #endif
-
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
 
@@ -645,20 +654,9 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 
 	int  i;
-	static unsigned int flag, multiplier;
 	size_t gws = global_work_size;
 	size_t lws = local_work_size;
 
-	if(!flag && mask_mode) {
-		load_mask(DB);
-		multiplier = 1;
-		for (i = 0; i < msk_ctx.count; i++)
-			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-#if MSCASH_DEBUG
-		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
-#endif
-		flag = 1;
-	}
 	if(mask_mode)
 		*pcount *= multiplier;
 

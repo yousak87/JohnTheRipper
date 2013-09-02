@@ -120,7 +120,7 @@ static struct bitmap_context_global *bitmap2;
 cl_mem  buffer_mask_gpu;
 static struct mask_context msk_ctx;
 static struct db_main *DB;
-static unsigned char *mask_offsets;
+static unsigned char *mask_offsets, multiplier = 1;
 
 static unsigned int mask_mode = 0;
 static unsigned int benchmark = 1;
@@ -129,6 +129,7 @@ cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
 
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
 static int crypt_all(int *pcount, struct db_salt *_salt);
+static void load_mask(struct fmt_main *fmt);
 static char *get_key_self_test(int index);
 static char *get_key(int index);
 
@@ -221,6 +222,8 @@ static void init(struct fmt_main *self){
 	HANDLE_CLERROR(ret_code,"Error creating buffer argument");
 	buffer_out  = clCreateBuffer( context[ocl_gpu_id], CL_MEM_WRITE_ONLY , 4*4*global_work_size, NULL, &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating buffer argument");
+	buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
 
 	argIndex = 0;
 
@@ -235,8 +238,14 @@ static void init(struct fmt_main *self){
 	if (!local_work_size)
 		local_work_size = LWS;
 
-	if(options.mask)
+	if(options.mask) {
+		int i;
 		mask_mode = 1;
+		load_mask(self);
+		multiplier = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+	}
 
 	if (options.verbosity > 2)
 		fprintf(stderr, "Local worksize (LWS) %d, Global worksize (GWS) %d\n", (int)local_work_size, (int)global_work_size);
@@ -457,12 +466,8 @@ static void opencl_nt_reset(struct db_main *db) {
 		buffer_bitmap2 = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_context_global), NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
 
-		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
-		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
-
 		if(mask_mode) {
 			setKernelArgs(&crk_kernel_mm);
-			//db -> max_int_keys = 26 * 26 * 10;
 			crk_kernel = crk_kernel_mm;
 			DB = db;
 		}
@@ -601,13 +606,13 @@ static void check_mask_nt(struct mask_context *msk_ctx) {
 		}
 }
 
-static void load_mask(struct db_main *db) {
+static void load_mask(struct fmt_main *fmt) {
 
-	if (!db->format->private.msk_ctx) {
+	if (!fmt->private.msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(&msk_ctx, db->format->private.msk_ctx, sizeof(struct mask_context));
+	memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_nt(&msk_ctx);
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
@@ -714,17 +719,7 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
 	unsigned int i;
-	static unsigned int multiplier;
 	int key_length_mul_4 = (((max_key_length+1) + 3)/4)*4;
-	static unsigned int flag;
-
-	if(!flag && mask_mode) {
-		load_mask(DB);
-		multiplier = 1;
-		for (i = 0; i < msk_ctx.count; i++)
-			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-		flag = 1;
-	}
 
 	if(mask_mode)
 		*pcount *= multiplier;

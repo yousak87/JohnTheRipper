@@ -30,10 +30,10 @@ unsigned char *mask_offset_buffer;
 static struct rpp_context rpp_ctx;
 
   /* calculates nCr combinations */
-void combination_util(void *arr, int data[], int start, int end, int index,
+static void combination_util(void *arr, int data[], int start, int end, int index,
     int r, int target, int *isOptimal);
 
-int check_range(struct mask_context *ctx, int rangePos)
+static int check_range(struct mask_context *ctx, int rangePos)
 {
 	unsigned char start = ctx->ranges[rangePos].chars[0];
 	int i;
@@ -71,7 +71,7 @@ int check_range(struct mask_context *ctx, int rangePos)
 	return 0;
 }
 
-int check_select_ranges(struct mask_context *ctx, int *data, int r)
+static int check_select_ranges(struct mask_context *ctx, int *data, int r)
 {
 	int i, flag = 1;
 	for (i = 0; i < r; i++)
@@ -79,7 +79,7 @@ int check_select_ranges(struct mask_context *ctx, int *data, int r)
 	return flag;
 }
 
-void calc_combination(void *arr, int n, int target)
+static void calc_combination(void *arr, int n, int target)
 {
 	int data[n], isOptimal = 0x7fffffff, i;
 	((struct mask_context *)arr)->count = 0x7fffffff;
@@ -91,7 +91,7 @@ void calc_combination(void *arr, int n, int target)
 
 }
 
-void combination_util(void *arr, int data[], int start, int end, int index,
+static void combination_util(void *arr, int data[], int start, int end, int index,
     int r, int target, int *isOptimal)
 {
 	int i;
@@ -172,8 +172,13 @@ void mask_process(struct fmt_main *fmt, char *mask, unsigned char flg_wrd) {
 		    "mask mode error: Increase MASK_RANGES_MAX value to RULE_RANGES_MAX.\n");
 		error();
 	}
-	if (fmt->params.num_internal_keys)
+	if (fmt->params.num_internal_keys) {
+		int i;
 		set_mask(&rpp_ctx, fmt, flg_wrd);
+		fmt->params.num_internal_keys = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			fmt->params.num_internal_keys *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+	}
 }
 
 void do_mask_crack(struct db_main *db, char *mask, char *wordlist)
@@ -209,7 +214,7 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist)
 	else
 		file = NULL;
 
-	mask_process(db->format, mask, (file!=NULL));
+	//mask_process(db->format, mask, (file!=NULL));
 
 	if (db->format)
 		length = db->format->params.max_keys_per_crypt;
