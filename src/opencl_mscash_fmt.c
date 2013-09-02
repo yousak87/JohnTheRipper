@@ -340,7 +340,7 @@ static void reset(struct db_main *db) {
 
 		if(mask_mode) {
 			crk_kernel = crk_kernel_mm;
-			db->max_int_keys = 26 * 26;
+			//db->max_int_keys = 26 * 26;
 			DB = db;
 		}
 		else
@@ -494,12 +494,11 @@ static void check_mask_dcc(struct mask_context *msk_ctx) {
 
 static void load_mask(struct db_main *db) {
 
-
-	if (!db->msk_ctx) {
+	if (!db->format->private.msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
+	memcpy(&msk_ctx, db->format->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_dcc(&msk_ctx);
 
 #if MSCASH_DEBUG
@@ -839,7 +838,7 @@ struct fmt_main fmt_opencl_mscash = {
 		sizeof(unsigned int) ,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		0,
+		676,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE | FMT_UNICODE,
 		tests
 	}, {

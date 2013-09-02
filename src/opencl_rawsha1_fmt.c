@@ -366,7 +366,7 @@ static void opencl_sha1_reset(struct db_main *db) {
 
 			set_kernel_args(&crk_kernel_mm);
 			crk_kernel = crk_kernel_mm;
-			db -> max_int_keys = 26 * 26 * 10;
+			//db -> max_int_keys = 26 * 26 * 10;
 			DB = db;
 		}
 
@@ -513,11 +513,11 @@ static void check_mask_sha1(struct mask_context *msk_ctx) {
 }
 
 static void load_mask(struct db_main *db) {
-	if (!db->msk_ctx) {
+	if (!db->format->private.msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
+	memcpy(&msk_ctx, db->format->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_sha1(&msk_ctx);
 #if RAWSHA1_DEBUG
 	int i, j;
@@ -809,7 +809,7 @@ struct fmt_main fmt_opencl_rawSHA1 = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		0,
+		(26*26*10),
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE,
 		tests
 	}, {

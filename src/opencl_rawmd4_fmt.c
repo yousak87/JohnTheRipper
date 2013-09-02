@@ -315,7 +315,7 @@ static void opencl_md4_reset(struct db_main *db) {
 
 		if(mask_mode) {
 			setKernelArgs(&crk_kernel_mm);
-			db -> max_int_keys = 26 * 26 * 10;
+			//db -> max_int_keys = 26 * 26 * 10;
 			crk_kernel = crk_kernel_mm;
 			DB = db;
 		}
@@ -454,11 +454,11 @@ static void check_mask_md4(struct mask_context *msk_ctx) {
 
 static void load_mask(struct db_main *db) {
 
-	if (!db->msk_ctx) {
+	if (!db->format->private.msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
+	memcpy(&msk_ctx, db->format->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_md4(&msk_ctx);
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
@@ -701,7 +701,7 @@ struct fmt_main fmt_opencl_rawMD4 = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		0,
+		(26*26*10),
 		FMT_CASE | FMT_8_BIT,
 		tests
 	}, {

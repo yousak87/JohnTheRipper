@@ -140,7 +140,7 @@ void opencl_DES_reset(struct db_main *db) {
 
 		if(mask_mode) {
 			/* Expected number of keys to be generated on GPU per work item. Actual number will vary depending on the mask but it should be close */
-			db -> max_int_keys = 1500;
+			//db -> max_int_keys = 1500;
 
 			DB = db;
 
@@ -687,11 +687,11 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 	HANDLE_CLERROR(clSetKernelArg(crk_kernel_mm[pos], 3, sizeof(int), &(salt->count)), "Set Kernel krnl Arg 5 :FAILED") ;
 
 	if(flag) {
-		if(!DB->msk_ctx) {
+		if(!DB->format->private.msk_ctx) {
 			fprintf(stderr, "No given mask.Exiting...\n");
 			exit(EXIT_FAILURE);
 		}
-		memcpy(&msk_ctx, DB->msk_ctx, sizeof(struct mask_context));
+		memcpy(&msk_ctx, DB->format->private.msk_ctx, sizeof(struct mask_context));
 		check_mask_descrypt(&msk_ctx);
 		int_keys = 1;
 		for (i = 0; i < msk_ctx.count; i++)

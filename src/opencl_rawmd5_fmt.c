@@ -327,7 +327,7 @@ static void opencl_md5_reset(struct db_main *db) {
 			setKernelArgs(&crk_kernel_ccc);
 			setKernelArgs(&crk_kernel_cnn);
 
-			db -> max_int_keys = 26 * 26 * 10;
+			//db -> max_int_keys = 26 * 26 * 10;
 
 			DB = db;
 
@@ -478,11 +478,11 @@ static void check_mask_rawmd5(struct mask_context *msk_ctx) {
 
 static void load_mask(struct db_main *db) {
 
-	if (!db->msk_ctx) {
+	if (!db->format->private.msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(&msk_ctx, db->msk_ctx, sizeof(struct mask_context));
+	memcpy(&msk_ctx, db->format->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_rawmd5(&msk_ctx);
 #if RAWMD5_DEBUG
 	int i, j;
@@ -810,7 +810,7 @@ struct fmt_main fmt_opencl_rawMD5 = {
 		SALT_ALIGN,
 		MAX_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		0,
+		(26*26*10),
 		FMT_CASE | FMT_8_BIT,
 		tests
 	}, {

@@ -27,6 +27,7 @@
 
 static struct mask_context msk_ctx;
 unsigned char *mask_offset_buffer;
+static struct rpp_context rpp_ctx;
 
   /* calculates nCr combinations */
 void combination_util(void *arr, int data[], int start, int end, int index,
@@ -127,10 +128,9 @@ void combination_util(void *arr, int data[], int start, int end, int index,
 	}
 }
 
-static void set_mask(struct rpp_context *rpp_ctx, struct db_main *db,
+static void set_mask(struct rpp_context *rpp_ctx, struct fmt_main *fmt,
     unsigned char flg_wrd)
 {
-
 	int i;
 
 	for (i = 0; i < rpp_ctx->count; i++) {
@@ -141,9 +141,10 @@ static void set_mask(struct rpp_context *rpp_ctx, struct db_main *db,
 		    rpp_ctx->ranges[i].pos - rpp_ctx->output;
 	}
 
-	calc_combination(&msk_ctx, rpp_ctx->count, db->max_int_keys);
+	calc_combination(&msk_ctx, rpp_ctx->count, fmt->params.num_internal_keys);
 	msk_ctx.flg_wrd = flg_wrd;
-	memcpy(db->msk_ctx, &msk_ctx, sizeof(struct mask_context));
+	memcpy(fmt->private.msk_ctx,
+	       &msk_ctx, sizeof(struct mask_context));
 #if MASK_DEBUG
 	int j;
 	for (i = 0; i < msk_ctx.count; i++) {
@@ -159,13 +160,25 @@ static void set_mask(struct rpp_context *rpp_ctx, struct db_main *db,
 		printf("\n");
 	}
 #endif
+}
 
+void mask_process(struct fmt_main *fmt, char *mask, unsigned char flg_wrd) {
 
+	rpp_init_mask(&rpp_ctx, mask);
+	rpp_process_rule(&rpp_ctx);
+
+	if (rpp_ctx.count > MASK_RANGES_MAX) {
+		fprintf(stderr,
+		    "mask mode error: Increase MASK_RANGES_MAX value to RULE_RANGES_MAX.\n");
+		error();
+	}
+	if (fmt->params.num_internal_keys)
+		set_mask(&rpp_ctx, fmt, flg_wrd);
 }
 
 void do_mask_crack(struct db_main *db, char *mask, char *wordlist)
 {
-	struct rpp_context rpp_ctx, rpp_ctx_restore;
+	struct rpp_context rpp_ctx_restore;
 	char word[128], *mask_word, line[128];
 	FILE *file = NULL;
 	int flag;
@@ -181,10 +194,7 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist)
 
 	log_event("Proceeding with mask mode");
 
-	rpp_init_mask(&rpp_ctx, mask);
-
 	status_init(NULL, 0);
-
 #if 0
 	rec_restore_mode(restore_state);
 	rec_init(db, save_state);
@@ -193,24 +203,13 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist)
 #else
 	crk_init(db, NULL, NULL);
 #endif
-	rpp_process_rule(&rpp_ctx);
-
-	if (rpp_ctx.count > MASK_RANGES_MAX) {
-		fprintf(stderr,
-		    "mask mode error: Increase MASK_RANGES_MAX value to RULE_RANGES_MAX.\n");
-		error();
-	}
 
 	if (wordlist)
 		file = fopen((const char *)wordlist, "r");
 	else
 		file = NULL;
 
-	db->msk_ctx =
-	    (struct mask_context *)mem_alloc(sizeof(struct mask_context));
-
-	if (db->max_int_keys)
-		set_mask(&rpp_ctx, db, (file != NULL));
+	mask_process(db->format, mask, (file!=NULL));
 
 	if (db->format)
 		length = db->format->params.max_keys_per_crypt;
@@ -264,7 +263,6 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist)
 	}
 
 	crk_done();
-	MEM_FREE(db->msk_ctx);
 	MEM_FREE(mask_offset_buffer);
 
 #if 0

@@ -55,6 +55,8 @@ void fmt_init(struct fmt_main *format)
 {
 	if (!format->private.initialized) {
 		format->methods.init(format);
+		format->private.msk_ctx =
+		(struct mask_context *)mem_alloc(sizeof(struct mask_context));
 		format->private.initialized = 1;
 	}
 #ifndef BENCH_BUILD
@@ -90,6 +92,7 @@ void fmt_done(struct fmt_main *format)
 {
 	if (format->private.initialized) {
 		format->methods.done();
+		MEM_FREE(format->private.msk_ctx);
 		format->private.initialized = 0;
 	}
 }
@@ -492,7 +495,6 @@ void fmt_default_done(void)
 
 void fmt_default_reset(struct db_main *db)
 {
-	if(db) db -> max_int_keys = 0;
 }
 
 char *fmt_default_prepare(char *fields[10], struct fmt_main *self)
