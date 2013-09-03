@@ -53,6 +53,7 @@ static struct bitmap_context_global *bitmap2;
 
 cl_mem buffer_mask_gpu;
 static unsigned int mask_mode = 0;
+static unsigned int multiplier = 1;
 static struct mask_context msk_ctx;
 static struct db_main *DB;
 static unsigned char *mask_offsets;
@@ -75,6 +76,7 @@ static int have_full_hashes;
 
 static int crypt_all(int *pcount, struct db_salt *_salt);
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
+static void load_mask(struct fmt_main *fmt);
 static char *get_key_self_test(int index);
 static char *get_key(int index);
 
@@ -190,9 +192,18 @@ static void init(struct fmt_main *self)
 	if(!local_work_size)
 		local_work_size = LWS;
 
+	buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
+
 	if(options.mask) {
+		int i;
 		mask_mode = 1;
 		local_work_size = LWS;
+		load_mask(self);
+		multiplier = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+		fprintf(stderr, "Multiply the c/s rate with:%d to get the correct c/s rate\n", multiplier);
 	}
 
 	create_clobj((global_work_size + local_work_size - 1) / local_work_size * local_work_size , self);
@@ -308,14 +319,11 @@ static void opencl_md4_reset(struct db_main *db) {
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
 		buffer_bitmap2 = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_context_global), NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
-		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
-		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
 
 		self_test = 0;
 
 		if(mask_mode) {
 			setKernelArgs(&crk_kernel_mm);
-			//db -> max_int_keys = 26 * 26 * 10;
 			crk_kernel = crk_kernel_mm;
 			DB = db;
 		}
@@ -452,13 +460,13 @@ static void check_mask_md4(struct mask_context *msk_ctx) {
 		}
 }
 
-static void load_mask(struct db_main *db) {
+static void load_mask(struct fmt_main *fmt) {
 
-	if (!db->format->private.msk_ctx) {
+	if (!fmt->private.msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(&msk_ctx, db->format->private.msk_ctx, sizeof(struct mask_context));
+	memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_md4(&msk_ctx);
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
@@ -563,19 +571,9 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
-	int count = *pcount, i, multiplier;
-	static unsigned int flag;
+	int count = *pcount, i;
 
 	global_work_size = (count + local_work_size - 1) / local_work_size * local_work_size;
-
-	if(!flag && mask_mode) {
-		load_mask(DB);
-		multiplier = 1;
-		for (i = 0; i < msk_ctx.count; i++)
-			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-		fprintf(stderr, "Multiply the c/s rate with:%d to get the correct c/s rate\n", multiplier);
-		flag = 1;
-	}
 
 	if(loaded_count != (salt->count)) {
 		load_hash(salt);
@@ -626,7 +624,6 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 	}
 
 	else return 0;
-
 }
 
 static int cmp_all(void *binary, int count)

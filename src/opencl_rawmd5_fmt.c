@@ -59,6 +59,7 @@ static struct bitmap_context_global *bitmap2;
 static struct mask_context msk_ctx;
 static unsigned char *mask_offsets;
 static struct db_main *DB;
+static unsigned int multiplier = 1;
 
 cl_kernel crk_kernel_nnn, crk_kernel_ccc, crk_kernel_cnn, crk_kernel_om, crk_kernel;
 
@@ -83,6 +84,8 @@ extern void common_find_best_gws(int sequential_id, unsigned int rounds, int ste
 
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
 static int crypt_all(int *pcount, struct db_salt *_salt);
+static void load_mask(struct fmt_main *fmt);
+static void select_kernel(struct mask_context *msk_ctx);
 static char *get_key_self_test(int index);
 static char *get_key(int index);
 
@@ -200,10 +203,21 @@ static void init(struct fmt_main *self)
 	if(!local_work_size)
 		local_work_size = LWS;
 
+	buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
+
 	if(options.mask) {
+		int i;
 		mask_mode = 1;
 		local_work_size = LWS;
 		global_work_size /= 2;
+		load_mask(self);
+		multiplier = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+#if RAWMD5_DEBUG
+		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
+#endif
 	}
 
 	create_clobj((global_work_size + local_work_size - 1) / local_work_size * local_work_size , self);
@@ -316,18 +330,13 @@ static void opencl_md5_reset(struct db_main *db) {
 		buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, length, NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer cmp_out\n");
 
-		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
-		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
-
 		self_test = 0;
 
 		if (mask_mode) {
-
 			setKernelArgs(&crk_kernel_nnn);
 			setKernelArgs(&crk_kernel_ccc);
 			setKernelArgs(&crk_kernel_cnn);
-
-			//db -> max_int_keys = 26 * 26 * 10;
+			select_kernel(&msk_ctx);
 
 			DB = db;
 
@@ -476,13 +485,13 @@ static void check_mask_rawmd5(struct mask_context *msk_ctx) {
 
 }
 
-static void load_mask(struct db_main *db) {
+static void load_mask(struct fmt_main *fmt) {
 
-	if (!db->format->private.msk_ctx) {
+	if (!fmt->private.msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(&msk_ctx, db->format->private.msk_ctx, sizeof(struct mask_context));
+	memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_rawmd5(&msk_ctx);
 #if RAWMD5_DEBUG
 	int i, j;
@@ -666,22 +675,9 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 {
 	int count = *pcount;
 	unsigned int i;
-	static unsigned int flag, multiplier;
 	cl_event evnt;
 
 	global_work_size = (count + local_work_size - 1) / local_work_size * local_work_size;
-
-	if((!flag) && mask_mode) {
-		load_mask(DB);
-		select_kernel(&msk_ctx);
-		multiplier = 1;
-		for (i = 0; i < msk_ctx.count; i++)
-			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-#if RAWMD5_DEBUG
-		fprintf(stderr, "Multiply the end c/s with:%d\n", multiplier);
-#endif
-		flag = 1;
-	}
 
 	if(mask_mode)
 		*pcount *= multiplier;

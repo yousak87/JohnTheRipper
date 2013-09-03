@@ -80,6 +80,7 @@ cl_mem buffer_mask_gpu;
 static struct mask_context msk_ctx;
 static struct db_main *DB;
 static unsigned char *mask_offsets;
+static unsigned int multiplier = 1;
 static unsigned int mask_mode = 0;
 
 cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
@@ -100,6 +101,7 @@ static struct fmt_tests tests[] = {
 static void set_key(char *_key, int index);
 static int crypt_all(int *pcount, struct db_salt *_salt);
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
+static void load_mask(struct fmt_main *fmt);
 static char *get_key_self_test(int index);
 static char *get_key(int index);
 
@@ -290,10 +292,21 @@ static void fmt_rawsha1_init(struct fmt_main *self) {
 	if(!local_work_size)
 		local_work_size = LWS;
 
+	buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
+
 	if (options.mask) {
+		int i;
 		local_work_size = LWS;
 		global_work_size /= 4;
 		mask_mode = 1;
+		load_mask(self);
+		multiplier = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+//#if RAWSHA1_DEBUG
+		fprintf(stderr, "c/s rate shown in status report is buggy. Multiply the p/s rate with:%d to get actual c/s rate.\n", multiplier);
+//#endif
 	}
 
 	create_clobj((global_work_size + local_work_size - 1) / local_work_size * local_work_size);
@@ -357,8 +370,6 @@ static void opencl_sha1_reset(struct db_main *db) {
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
 		buffer_bitmap2 = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct bitmap_context_global), NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
-		buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
-		HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
 
 		self_test = 0;
 
@@ -366,7 +377,6 @@ static void opencl_sha1_reset(struct db_main *db) {
 
 			set_kernel_args(&crk_kernel_mm);
 			crk_kernel = crk_kernel_mm;
-			//db -> max_int_keys = 26 * 26 * 10;
 			DB = db;
 		}
 
@@ -512,12 +522,12 @@ static void check_mask_sha1(struct mask_context *msk_ctx) {
 		}
 }
 
-static void load_mask(struct db_main *db) {
-	if (!db->format->private.msk_ctx) {
+static void load_mask(struct fmt_main *fmt) {
+	if (!fmt->private.msk_ctx) {
 		fprintf(stderr, "No given mask.Exiting...\n");
 		exit(EXIT_FAILURE);
 	}
-	memcpy(&msk_ctx, db->format->private.msk_ctx, sizeof(struct mask_context));
+	memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_sha1(&msk_ctx);
 #if RAWSHA1_DEBUG
 	int i, j;
@@ -721,20 +731,8 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
 	int count = *pcount, i;
-	static unsigned int flag, multiplier;
 
 	global_work_size = (count + local_work_size - 1) / local_work_size * local_work_size;
-
-	if(!flag && mask_mode) {
-		load_mask(DB);
-		multiplier = 1;
-		for (i = 0; i < msk_ctx.count; i++)
-			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-//#if RAWSHA1_DEBUG
-		fprintf(stderr, "c/s rate shown in status report is buggy. Multiply the p/s rate with:%d to get actual c/s rate.\n", multiplier);
-//#endif
-		flag = 1;
-	}
 
 	if(mask_mode)
 		*pcount *= multiplier;
