@@ -1170,6 +1170,7 @@ static void john_run(void)
 
 		tty_done();
 
+		if (options.verbosity > 1)
 		if (john_main_process && database.password_count < remaining) {
 			char *might = "Warning: passwords printed above might";
 			char *partial = " be partial";
