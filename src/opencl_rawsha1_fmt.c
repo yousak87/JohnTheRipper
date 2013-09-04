@@ -181,6 +181,7 @@ static void release_clobj(void){
 	HANDLE_CLERROR(clReleaseMemObject(buffer_out), "Error Releasing buffer_out");
 	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_keys), "Error Releasing pinned_saved_keys");
 	HANDLE_CLERROR(clReleaseMemObject(pinned_partial_hashes), "Error Releasing pinned_partial_hashes");
+	HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release gpu mask buffer");
 	MEM_FREE(res_hashes);
 
 	if(!self_test) {
@@ -195,7 +196,6 @@ static void release_clobj(void){
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), "Release output key indices");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap1), "Release bitmap buffer");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap2), "Release bitmap buffer");
-		HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release gpu mask buffer");
 	}
 }
 

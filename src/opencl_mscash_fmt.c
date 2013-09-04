@@ -94,6 +94,7 @@ static void done()
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel mask mode");
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel other modes");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
+	HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release mask");
 
 	if(!self_test) {
 		int i;
@@ -105,7 +106,6 @@ static void done()
 			MEM_FREE(loaded_hashes[i]);
 		}
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), "Release output key indeces");
-		HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release mask");
 		MEM_FREE(loaded_hashes);
 		MEM_FREE(bitmaps1);
 		MEM_FREE(bitmaps2);

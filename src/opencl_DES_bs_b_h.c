@@ -41,6 +41,7 @@ static unsigned char *input_keys;
 static cl_kernel crk_kernel_mm[4096];
 static cl_mem mask_gpu;
 static struct mask_context msk_ctx;
+static unsigned int int_keys = 1;
 static struct db_main *DB;
 
 /* Variables required for other modes */
@@ -69,11 +70,11 @@ void DES_opencl_clean_all_buffer() {
 
 	HANDLE_CLERROR(clReleaseMemObject(opencl_DES_bs_data_gpu), errMsg);
 	HANDLE_CLERROR(clReleaseMemObject(B_gpu), errMsg);
+	HANDLE_CLERROR(clReleaseMemObject(mask_gpu), errMsg);
 
 	if(!self_test) {
 
 		HANDLE_CLERROR(clReleaseMemObject(transfer_keys_gpu), errMsg);
-		HANDLE_CLERROR(clReleaseMemObject(mask_gpu), errMsg);
 		HANDLE_CLERROR(clReleaseMemObject(loaded_hash_gpu), errMsg);
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), errMsg);
 		for( i = 0; i < 4096; i++) {
@@ -133,8 +134,6 @@ void opencl_DES_reset(struct db_main *db) {
 		/* buffer_outKeyIdx is multiplexed for use as mask_offset input and keyIdx output */
 		buffer_outKeyIdx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, length, NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer compare output\n");
-		mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct mask_context) , NULL, &ret_code);
-		HANDLE_CLERROR(ret_code, "Error creating buffer for mask");
 
 		self_test = 0;
 
@@ -467,6 +466,9 @@ static void init_dev()
 	B_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, 64 * MULTIPLIER * sizeof(DES_bs_vector), NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, errMsg);
 
+	mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct mask_context) , NULL, &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating buffer for mask");
+
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], index768_gpu, CL_TRUE, 0, 768 * sizeof(unsigned int), index768, 0, NULL, NULL ), "Failed Copy data to gpu");
 
 	opencl_read_source("$JOHN/kernels/DES_bs_kernel_1.cl") ;
@@ -499,11 +501,28 @@ void DES_bs_select_device(struct fmt_main *fmt)
 
 	/* Check if the mask is being used */
 	if (options.mask) {
+		int i;
 		mask_mode = 1;
 		if (options.wordlist) {
 			fprintf(stderr, "mask + wordlist not supported by this format.\n");
 			exit(EXIT_FAILURE);
 		}
+
+		if(!fmt->private.msk_ctx) {
+			fprintf(stderr, "No given mask.Exiting...\n");
+			exit(EXIT_FAILURE);
+		}
+		memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
+		check_mask_descrypt(&msk_ctx);
+		int_keys = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			int_keys *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+#if DES_DEBUG
+		for(i = 0; i < 8; i++)
+			printf("%d ",msk_ctx.activeRangePos[i]);
+		printf("\n");
+#endif
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 	}
 
 	if(!global_work_size)
@@ -625,7 +644,7 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 {
 	int keys_count = *pcount;
 	unsigned int sections = 0;
-	static unsigned int pos, flag = 1, int_keys = 1 ;
+	static unsigned int pos;
 	struct db_password *pw;
 	unsigned int i = 0, *bin;
 	cl_event evnt;
@@ -685,25 +704,6 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 		keys_changed = 0;
 	}
 	HANDLE_CLERROR(clSetKernelArg(crk_kernel_mm[pos], 3, sizeof(int), &(salt->count)), "Set Kernel krnl Arg 5 :FAILED") ;
-
-	if(flag) {
-		if(!DB->format->private.msk_ctx) {
-			fprintf(stderr, "No given mask.Exiting...\n");
-			exit(EXIT_FAILURE);
-		}
-		memcpy(&msk_ctx, DB->format->private.msk_ctx, sizeof(struct mask_context));
-		check_mask_descrypt(&msk_ctx);
-		int_keys = 1;
-		for (i = 0; i < msk_ctx.count; i++)
-			int_keys *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-#if DES_DEBUG
-		for(i = 0; i < 8; i++)
-			printf("%d ",msk_ctx.activeRangePos[i]);
-		printf("\n");
-#endif
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
-		flag = 0;
-	}
 
 	*pcount = (sections * int_keys) ;
 

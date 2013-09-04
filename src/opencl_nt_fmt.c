@@ -142,6 +142,7 @@ static void release_clobj(void)
 	HANDLE_CLERROR(clReleaseMemObject(buffer_out), "Release mem setting");
 	HANDLE_CLERROR(clReleaseMemObject(pinned_bbbs), "Release mem out");
         HANDLE_CLERROR(clReleaseMemObject(pinned_saved_keys), "Release mem out");
+	HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release mask");
 
 	MEM_FREE(res_hashes);
 
@@ -157,7 +158,6 @@ static void release_clobj(void)
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), "Release output key indeces");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap1), "Release bitmap1");
 		HANDLE_CLERROR(clReleaseMemObject(buffer_bitmap2), "Release bitmap2");
-		HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release mask");
 	}
 }
 

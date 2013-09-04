@@ -47,6 +47,7 @@ static size_t DES_local_work_size = WORK_GROUP_SIZE;
 static size_t DES_global_work_size = MULTIPLIER;
 static int self_test = 1; // This flag is reset to zero befor craking
 static int mask_mode = 0;
+static unsigned int int_keys = 1;
 
 static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt);
 static int opencl_DES_bs_crypt_25_om(int *pcount, struct db_salt *salt);
@@ -64,10 +65,10 @@ void DES_opencl_clean_all_buffer()
 	HANDLE_CLERROR(clReleaseMemObject(index96_gpu), errMsg);
 	HANDLE_CLERROR(clReleaseMemObject(opencl_DES_bs_data_gpu), errMsg);
 	HANDLE_CLERROR(clReleaseMemObject(B_gpu), errMsg);
+	HANDLE_CLERROR(clReleaseMemObject(mask_gpu), errMsg);
 
 	if(!self_test) {
 		HANDLE_CLERROR(clReleaseMemObject(transfer_keys_gpu), errMsg);
-		HANDLE_CLERROR(clReleaseMemObject(mask_gpu), errMsg);
 		HANDLE_CLERROR(clReleaseMemObject(loaded_hashes_gpu), errMsg);
 		HANDLE_CLERROR(clReleaseMemObject(buffer_outKeyIdx), errMsg);
 		HANDLE_CLERROR(clReleaseMemObject(mask_gpu), errMsg);
@@ -115,8 +116,6 @@ void opencl_DES_reset(struct db_main *db) {
 		HANDLE_CLERROR(ret_code, "Error creating buffer compare output\n");
 		transfer_keys_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, 8 * MULTIPLIER , NULL, &ret_code);
 		HANDLE_CLERROR(ret_code, "Error creating buffer input keys.\n");
-		mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct mask_context) , NULL, &ret_code);
-		HANDLE_CLERROR(ret_code, "Error creating buffer for mask transfer.");
 
 		self_test = 0;
 
@@ -204,7 +203,6 @@ static void check_mask_descrypt(struct mask_context *msk_ctx) {
 			for (j = 0; j < msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count; j++)
 				msk_ctx->ranges[msk_ctx -> activeRangePos[i]].chars[j] =
 					msk_ctx->ranges[msk_ctx -> activeRangePos[i]].start + j;
-
 		}
 }
 
@@ -472,13 +470,42 @@ void DES_bs_select_device(struct fmt_main *fmt)
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], index768_gpu, CL_TRUE, 0, 768*sizeof(unsigned int), index768, 0, NULL, NULL ), "Failed Copy data to gpu");
 
+	mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE, sizeof(struct mask_context) , NULL, &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating buffer for mask transfer.");
+
 	/* Check if the mask is being used */
 	if(options.mask) {
+		int i;
 		mask_mode = 1;
 		if(options.wordlist) {
 			fprintf(stderr, "mask + wordlist not supported by this format.\n");
 			exit(EXIT_FAILURE);
 		}
+
+		if(!fmt->private.msk_ctx) {
+			fprintf(stderr, "No given mask.Exiting...\n");
+			exit(EXIT_FAILURE);
+		}
+		memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
+		check_mask_descrypt(&msk_ctx);
+		int_keys = 1;
+		for (i = 0; i < msk_ctx.count; i++)
+			int_keys *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+#if DES_DEBUG
+		fprintf(stderr, "Multiply the end c/s with:%d\n", int_keys);
+		int j;
+		for(i = 0; i < 8; i++)
+			printf("%d ",msk_ctx.activeRangePos[i]);
+			printf("\n");
+			for(i = 0; i < msk_ctx.count; i++){
+				for(j = 0; j < msk_ctx.ranges[msk_ctx.activeRangePos[i]].count; j++)
+					printf("%c ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].chars[j]);
+				printf("\n");
+				printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
+			      printf("\n");
+			}
+#endif
+		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 	}
 
 	if (!global_work_size)
@@ -578,10 +605,8 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 {
 	int keys_count = *pcount;
 	unsigned int sections = 0;
-	static unsigned int int_keys = 1;
 	int i = 0, *bin;
 	struct db_password *pw;
-	static int flag = 1;
 	cl_event evnt;
 	size_t N, M;
 
@@ -614,35 +639,6 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 		keys_changed = 0;
 	}
 	HANDLE_CLERROR(clSetKernelArg(crk_kernel_mm, 4, sizeof(int), &(salt->count)), "Set Kernel krnl Arg 5 :FAILED") ;
-
-	if(flag) {
-		if(!DB->format->private.msk_ctx) {
-			fprintf(stderr, "No given mask.Exiting...\n");
-			exit(EXIT_FAILURE);
-		}
-		memcpy(&msk_ctx, DB->format->private.msk_ctx, sizeof(struct mask_context));
-		check_mask_descrypt(&msk_ctx);
-		int_keys = 1;
-		for (i = 0; i < msk_ctx.count; i++)
-			int_keys *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-#if DES_DEBUG
-		fprintf(stderr, "Multiply the end c/s with:%d\n", int_keys);
-		int j;
-		for(i = 0; i < 8; i++)
-			printf("%d ",msk_ctx.activeRangePos[i]);
-			printf("\n");
-			for(i = 0; i < msk_ctx.count; i++){
-				for(j = 0; j < msk_ctx.ranges[msk_ctx.activeRangePos[i]].count; j++)
-					printf("%c ",msk_ctx.ranges[msk_ctx.activeRangePos[i]].chars[j]);
-				printf("\n");
-				printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
-			      printf("\n");
-			}
-#endif
-		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
-		flag = 0;
-	}
-
 
 	*pcount = (sections * int_keys) ;
 
