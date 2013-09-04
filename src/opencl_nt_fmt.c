@@ -135,7 +135,11 @@ static char *get_key(int index);
 
 static void release_clobj(void)
 {
-	clEnqueueUnmapMemObject(queue[ocl_gpu_id], pinned_bbbs, bbbs, 0, NULL, NULL);
+	if (benchmark)
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[ocl_gpu_id], pinned_bbbs, bbbs, 0,NULL,NULL), "Error Unmapping partial_hashes");
+	else
+		MEM_FREE(bbbs);
+
 	clEnqueueUnmapMemObject(queue[ocl_gpu_id], pinned_saved_keys, saved_plain, 0, NULL, NULL);
 
         HANDLE_CLERROR(clReleaseMemObject(buffer_keys), "Release mem in");
@@ -445,7 +449,9 @@ static void opencl_nt_reset(struct db_main *db) {
 	if(db) {
 		unsigned int length = 0;
 
+		HANDLE_CLERROR(clEnqueueUnmapMemObject(queue[ocl_gpu_id], pinned_bbbs, bbbs, 0,NULL,NULL), "Error Unmapping partial_hashes");
 		loaded_hashes = (unsigned int*)mem_alloc(((db->password_count) * 4 + 1)*sizeof(unsigned int));
+		bbbs = (unsigned int*)mem_alloc(((db->password_count) + 1)*sizeof(unsigned int));
 		outKeyIdx     = (unsigned int*)mem_calloc((db->password_count) * sizeof(unsigned int) * 2);
 		mask_offsets  = (unsigned char*) mem_calloc(db->format->params.max_keys_per_crypt);
 		bitmap1       = (struct bitmap_context_mixed*)mem_alloc(sizeof(struct bitmap_context_mixed));

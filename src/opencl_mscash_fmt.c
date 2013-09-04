@@ -315,7 +315,9 @@ static void reset(struct db_main *db) {
 		unsigned int length;
 		max_salts = db->salt_count;
 
+		MEM_FREE(outbuffer);
 		outKeyIdx     = (unsigned int*)mem_calloc((db->password_count) * sizeof(unsigned int) * 2);
+		outbuffer     = (unsigned int*)mem_calloc(((db->password_count) + 1) * sizeof(unsigned int));
 		loaded_hashes = (unsigned int **)mem_calloc(max_salts * sizeof(unsigned int *));
 		loaded_count = (unsigned int*)mem_calloc(max_salts * sizeof(unsigned int));
 		bitmaps1 = (struct bitmap_context_mixed *)mem_alloc(max_salts * sizeof(struct bitmap_context_mixed));
