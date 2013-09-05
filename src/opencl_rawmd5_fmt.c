@@ -345,8 +345,6 @@ static void opencl_md5_reset(struct db_main *db) {
 			select_kernel(&msk_ctx);
 
 			DB = db;
-
-			crk_kernel = crk_kernel_nnn;
 		}
 
 		else {
