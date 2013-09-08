@@ -769,10 +769,7 @@ static int cmp_exact(char *source, int index)
 	unsigned int count = self_test ? global_work_size: loaded_count;
 	if (self_test) {
 		if (!have_full_hashes) {
-			clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
-				sizeof(cl_uint) * (count),
-				sizeof(cl_uint) * 3 * count,
-				res_hashes, 0, NULL, NULL);
+			HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE, sizeof(cl_uint) * (count), sizeof(cl_uint) * 3 * count, res_hashes, 0, NULL, NULL), "failed reading results");
 				have_full_hashes = 1;
 		}
 
