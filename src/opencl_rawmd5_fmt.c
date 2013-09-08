@@ -214,7 +214,8 @@ static void init(struct fmt_main *self)
 		int i;
 		mask_mode = 1;
 		local_work_size = LWS;
-		global_work_size /= 2;
+		if (!getenv("GWS"))
+			global_work_size /= 2;
 		load_mask(self);
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)

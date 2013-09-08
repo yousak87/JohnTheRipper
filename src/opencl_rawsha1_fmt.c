@@ -302,7 +302,8 @@ static void fmt_rawsha1_init(struct fmt_main *self) {
 	if (options.mask) {
 		int i;
 		local_work_size = LWS;
-		global_work_size /= 4;
+		if (!getenv("GWS"))
+			global_work_size /= 4;
 		mask_mode = 1;
 		load_mask(self);
 		multiplier = 1;
