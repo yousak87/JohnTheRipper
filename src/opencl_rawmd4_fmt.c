@@ -209,6 +209,14 @@ static void init(struct fmt_main *self)
 		fprintf(stderr, "Multiply the c/s rate with:%d to get the correct c/s rate\n", multiplier);
 	}
 
+	// Current key_idx can only hold 26 bits of offset so
+	// we can't reliably use a GWS higher than 4.7M or so.
+	if (global_work_size > (1 << 26) * 4 / PLAINTEXT_LENGTH) {
+		global_work_size = (1 << 26) * 4 / PLAINTEXT_LENGTH;
+		global_work_size = global_work_size / local_work_size *
+			local_work_size;
+	}
+
 	create_clobj((global_work_size + local_work_size - 1) / local_work_size * local_work_size , self);
 
 	if (options.verbosity > 2)
