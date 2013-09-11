@@ -512,7 +512,7 @@ static void load_mask(struct fmt_main *fmt) {
 	}
 	memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_rawmd5(&msk_ctx);
-#if RAWMD5_DEBUG
+//#if RAWMD5_DEBUG
 	int i, j;
 	for(i = 0; i < MASK_RANGES_MAX; i++)
 	    printf("%d ",msk_ctx.activeRangePos[i]);
@@ -532,7 +532,7 @@ static void load_mask(struct fmt_main *fmt) {
 			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
 			printf("\n");
 	}
-#endif
+//#endif
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
 
@@ -627,15 +627,15 @@ static void passgen(int ctr, int offset, char *key) {
 	offset = msk_ctx.flg_wrd ? offset : 0;
 
 	i =  ctr % msk_ctx.ranges[msk_ctx.activeRangePos[0]].count;
-	key[msk_ctx.activeRangePos[0] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[0]].chars[i];
+	key[msk_ctx.ranges[msk_ctx.activeRangePos[0]].pos + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[0]].chars[i];
 
 	if (msk_ctx.ranges[msk_ctx.activeRangePos[1]].count) {
 		j = (ctr / msk_ctx.ranges[msk_ctx.activeRangePos[0]].count) % msk_ctx.ranges[msk_ctx.activeRangePos[1]].count;
-		key[msk_ctx.activeRangePos[1] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[1]].chars[j];
+		key[msk_ctx.ranges[msk_ctx.activeRangePos[1]].pos + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[1]].chars[j];
 	}
 	if (msk_ctx.ranges[msk_ctx.activeRangePos[2]].count) {
 		k = (ctr / (msk_ctx.ranges[msk_ctx.activeRangePos[0]].count * msk_ctx.ranges[msk_ctx.activeRangePos[1]].count)) % msk_ctx.ranges[msk_ctx.activeRangePos[2]].count;
-		key[msk_ctx.activeRangePos[2] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[2]].chars[k];
+		key[msk_ctx.ranges[msk_ctx.activeRangePos[2]].pos + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[2]].chars[k];
 	}
 }
 
