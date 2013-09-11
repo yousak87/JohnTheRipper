@@ -417,7 +417,7 @@ __kernel void md5_ccc(__global uint *keys,
 	uint len = base & 63;
 	uint W[16] = { 0 };
 	uint num_loaded_hashes = loaded_hashes[0];
-	uchar activeRangePos[3], rangeNumChars[3], start[3];
+	uchar activeRangePos[3], rangeNumChars[3], start[3], activeCharPos[3];
 
 	int i, j, k, ctr, ii;
 
@@ -433,6 +433,7 @@ __kernel void md5_ccc(__global uint *keys,
 	for(i = 0; i < 3; i++) {
 		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
 		start[i] = msk_ctx[0].ranges[activeRangePos[i]].start;
+		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos;
 	}
 
 	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
@@ -454,7 +455,7 @@ __kernel void md5_ccc(__global uint *keys,
 		ii = outKeyIdx[gid>>2];
 		ii = (ii >> ((gid&3) << 3))&0xFF;
 		for(i = 0; i < 3; i++)
-			activeRangePos[i] += ii;
+			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
 		
 		if(gid==1)
@@ -480,13 +481,13 @@ __kernel void md5_ccc(__global uint *keys,
 	W[14] = len << 3;
 
 	ctr = i = j = k = 0;
-	if (rangeNumChars[2]) PUTCHAR(W, activeRangePos[2], start[2]);
-	if (rangeNumChars[1]) PUTCHAR(W, activeRangePos[1], start[1]);
+	if (rangeNumChars[2]) PUTCHAR(W, activeCharPos[2], start[2]);
+	if (rangeNumChars[1]) PUTCHAR(W, activeCharPos[1], start[1]);
 
 	do {
 		do {
 			for (i = 0; i < rangeNumChars[0]; i++) {
-				PUTCHAR(W, activeRangePos[0], (start[0] + i));
+				PUTCHAR(W, activeCharPos[0], (start[0] + i));
 				raw_md5_encrypt(W, &hash, len);
 				cmp(loaded_hashes,
 				    sbitmap0, sbitmap1, sbitmap2, sbitmap3,
@@ -496,14 +497,14 @@ __kernel void md5_ccc(__global uint *keys,
 			}
 
 			j++;
-			PUTCHAR(W, activeRangePos[1], (start[1] + j));
+			PUTCHAR(W, activeCharPos[1], (start[1] + j));
 
 		} while ( j < rangeNumChars[1]);
 
 		k++;
-		PUTCHAR(W, activeRangePos[2], (start[2] + k));
+		PUTCHAR(W, activeCharPos[2], (start[2] + k));
 
-		PUTCHAR(W, activeRangePos[1], start[1]);
+		PUTCHAR(W, activeCharPos[1], start[1]);
 		j = 0;
 
 	} while( k < rangeNumChars[2]);

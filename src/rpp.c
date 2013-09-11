@@ -293,7 +293,7 @@ char *msk_next(struct rpp_context *rpp_ctx, struct mask_context *msk_ctx, int *f
 			if(skipcurrentidx == index) goto next_idx;
 			if(processcurrentidx == index) goto skip_search;
 			for (i = 0; i < msk_ctx -> count; i++) {
-				if(msk_ctx -> activeRangePos[i] == index) {
+				if(msk_ctx -> ranges[msk_ctx -> activeRangePos[i]].pos == index) {
 					skipcurrentidx = index;
 					goto next_idx;
 				}
