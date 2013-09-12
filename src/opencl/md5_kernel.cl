@@ -317,7 +317,7 @@ __kernel void md5_nnn(__global uint *keys,
 	uint len = base & 63;
 	uint W[16] = { 0 };
 	uint num_loaded_hashes = loaded_hashes[0];
-	uchar activeRangePos[3], rangeNumChars[3];
+	uchar activeRangePos[3], rangeNumChars[3], activeCharPos[3];
 
 	int i, ii, j, k, ctr;
 
@@ -331,8 +331,10 @@ __kernel void md5_nnn(__global uint *keys,
 		activeRangePos[i] = msk_ctx[0].activeRangePos[i];
 	}
 
-	for(i = 0; i < 3; i++)
+	for(i = 0; i < 3; i++) {
 		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
+		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos; 
+	}
 
 	// Parallel load , works only if LWS is 64
 	ranges[lid] = msk_ctx[0].ranges[activeRangePos[0]].chars[lid];
@@ -358,7 +360,7 @@ __kernel void md5_nnn(__global uint *keys,
 		ii = outKeyIdx[gid>>2];
 		ii = (ii >> ((gid&3) << 3))&0xFF;
 		for(i = 0; i < 3; i++)
-			activeRangePos[i] += ii;
+			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
 		
 		if(gid==1)
@@ -375,13 +377,13 @@ __kernel void md5_nnn(__global uint *keys,
 	W[14] = len << 3;
 
 	ctr = i = j = k = 0;
-	if (rangeNumChars[2]) PUTCHAR(W, activeRangePos[2], ranges[2 * MAX_GPU_CHARS]);
-	if (rangeNumChars[1]) PUTCHAR(W, activeRangePos[1], ranges[MAX_GPU_CHARS]);
+	if (rangeNumChars[2]) PUTCHAR(W, activeCharPos[2], ranges[2 * MAX_GPU_CHARS]);
+	if (rangeNumChars[1]) PUTCHAR(W, activeCharPos[1], ranges[MAX_GPU_CHARS]);
 
 	do {
 		do {
 			for (i = 0; i < rangeNumChars[0]; i++) {
-				PUTCHAR(W, activeRangePos[0], ranges[i]);
+				PUTCHAR(W, activeCharPos[0], ranges[i]);
 				raw_md5_encrypt(W, &hash, len);
 				cmp(loaded_hashes,
 				    sbitmap0, sbitmap1, sbitmap2, sbitmap3,
@@ -391,14 +393,14 @@ __kernel void md5_nnn(__global uint *keys,
 			}
 
 			j++;
-			PUTCHAR(W, activeRangePos[1], ranges[j + MAX_GPU_CHARS]);
+			PUTCHAR(W, activeCharPos[1], ranges[j + MAX_GPU_CHARS]);
 
 		} while ( j < rangeNumChars[1]);
 
 		k++;
-		PUTCHAR(W, activeRangePos[2], ranges[k + 2 * MAX_GPU_CHARS]);
+		PUTCHAR(W, activeCharPos[2], ranges[k + 2 * MAX_GPU_CHARS]);
 
-		PUTCHAR(W, activeRangePos[1], ranges[MAX_GPU_CHARS]);
+		PUTCHAR(W, activeCharPos[1], ranges[MAX_GPU_CHARS]);
 		j = 0;
 
 	} while( k < rangeNumChars[2]);
@@ -468,15 +470,6 @@ __kernel void md5_ccc(__global uint *keys,
 			barrier(CLK_GLOBAL_MEM_FENCE);
 	}
 
-	
-
-	// This does not work, probably due to compiler bug.
-	/*for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {	\
-			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes] = 0;\
-			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes + num_loaded_hashes] = 0;\
-	}
-	barrier(CLK_GLOBAL_MEM_FENCE);*/
-
 	keys += base >> 6;
 	for (i = 0; i < (len+3)/4; i++)
 		W[i] = keys[i];
@@ -523,7 +516,6 @@ __kernel void md5_cnn(__global uint *keys,
 		      __global struct bitmap_context_global *bitmap2
  		    )
 
-
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
@@ -532,7 +524,7 @@ __kernel void md5_cnn(__global uint *keys,
 	uint len = base & 63;
 	uint W[16] = { 0 };
 	uint num_loaded_hashes = loaded_hashes[0];
-	uchar activeRangePos[3], rangeNumChars[3], start;
+	uchar activeRangePos[3], rangeNumChars[3], start, activeCharPos[3];
 
 	int i, ii, j, k, ctr;
 
@@ -546,8 +538,10 @@ __kernel void md5_cnn(__global uint *keys,
 		activeRangePos[i] = msk_ctx[0].activeRangePos[i];
 	}
 
-	for(i = 0; i < 3; i++)
+	for(i = 0; i < 3; i++) {
 		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
+		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos;
+	}
 
 	start = msk_ctx[0].ranges[activeRangePos[0]].start;
 
@@ -574,7 +568,7 @@ __kernel void md5_cnn(__global uint *keys,
 		ii = outKeyIdx[gid>>2];
 		ii = (ii >> ((gid&3) << 3))&0xFF;
 		for(i = 0; i < 3; i++)
-			activeRangePos[i] += ii;
+			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
 		
 		if(gid==1)
@@ -591,13 +585,13 @@ __kernel void md5_cnn(__global uint *keys,
 	W[14] = len << 3;
 
 	ctr = i = j = k = 0;
-	if (rangeNumChars[2]) PUTCHAR(W, activeRangePos[2], ranges[MAX_GPU_CHARS]);
-	if (rangeNumChars[1]) PUTCHAR(W, activeRangePos[1], ranges[0]);
+	if (rangeNumChars[2]) PUTCHAR(W, activeCharPos[2], ranges[MAX_GPU_CHARS]);
+	if (rangeNumChars[1]) PUTCHAR(W, activeCharPos[1], ranges[0]);
 
 	do {
 		do {
 			for (i = 0; i < rangeNumChars[0]; i++) {
-				PUTCHAR(W, activeRangePos[0], (start + i));
+				PUTCHAR(W, activeCharPos[0], (start + i));
 				raw_md5_encrypt(W, &hash, len);
 				cmp(loaded_hashes,
 				    sbitmap0, sbitmap1, sbitmap2, sbitmap3,
@@ -607,14 +601,14 @@ __kernel void md5_cnn(__global uint *keys,
 			}
 
 			j++;
-			PUTCHAR(W, activeRangePos[1], ranges[j]);
+			PUTCHAR(W, activeCharPos[1], ranges[j]);
 
 		} while ( j < rangeNumChars[1]);
 
 		k++;
-		PUTCHAR(W, activeRangePos[2], ranges[k + MAX_GPU_CHARS]);
+		PUTCHAR(W, activeCharPos[2], ranges[k + MAX_GPU_CHARS]);
 
-		PUTCHAR(W, activeRangePos[1], ranges[0]);
+		PUTCHAR(W, activeCharPos[1], ranges[0]);
 		j = 0;
 
 	} while( k < rangeNumChars[2]);
