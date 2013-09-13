@@ -212,6 +212,16 @@ __kernel void md4_self_test(__global const uint *keys, __global const ulong *ind
 	barrier(CLK_GLOBAL_MEM_FENCE);
 #endif
 
+__kernel void zero(__global uint *outKeyIdx, uint num_loaded_hashes) {
+	uint i;
+	uint gid = get_global_id(0);
+	uint num_keys = get_global_size(0);
+	for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {	
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes] = 0;
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes + num_loaded_hashes] = 0;
+	}
+  
+}
 __kernel void md4_om(__global const uint *keys,
 			    __global const ulong *index,
 			    __global uint *loaded_hashes,
@@ -248,8 +258,6 @@ __kernel void md4_om(__global const uint *keys,
 		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
 
 	barrier(CLK_LOCAL_MEM_FENCE);
-
-	LOAD_OUTKEYIDX();
 
 	keys += base >> 6;
 
@@ -320,12 +328,12 @@ __kernel void md4_mm(__global const uint *keys,
 		for(i = 0; i < 3; i++)
 			activeRangePos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
+		
+		if(gid==1)
+			for (i = 0; i < num_loaded_hashes; i++)
+				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+		barrier(CLK_GLOBAL_MEM_FENCE);
 	}
-
-	if(gid==1)
-		for (i = 0; i < num_loaded_hashes; i++)
-			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
-	barrier(CLK_GLOBAL_MEM_FENCE);
 
 	keys += base >> 6;
 

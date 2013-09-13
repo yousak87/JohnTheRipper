@@ -58,7 +58,7 @@ static struct mask_context msk_ctx;
 static struct db_main *DB;
 static unsigned char *mask_offsets;
 
-cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
+cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om, zero;
 static unsigned int self_test = 1; //Used as a flag
 
 #define MIN(a, b)               (((a) > (b)) ? (b) : (a))
@@ -169,6 +169,7 @@ static void done(void)
 	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel");
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(zero), "Release zero");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 }
 
@@ -182,6 +183,9 @@ static void init(struct fmt_main *self)
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
 	crk_kernel_om = clCreateKernel(program[ocl_gpu_id], "md4_om", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+	
+	zero = clCreateKernel(program[ocl_gpu_id], "zero", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
 	/* Read LWS/GWS prefs from config or environment */
@@ -305,6 +309,7 @@ static void setKernelArgs(cl_kernel *kernel) {
 	if(mask_mode)
 		HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu),
 			"Error setting argument 6");
+	HANDLE_CLERROR(clSetKernelArg(zero, 0, sizeof(buffer_outKeyIdx), &buffer_outKeyIdx), "Error setting argument 0");	
 }
 
 static void opencl_md4_reset(struct db_main *db) {
@@ -609,6 +614,12 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0,
 			(DB->format->params.max_keys_per_crypt), mask_offset_buffer, 0, NULL, NULL),
 			"failed in clEnqueWriteBuffer buffer_outKeyIdx");
+	else {
+		HANDLE_CLERROR(clSetKernelArg(zero, 1, sizeof(uint), &loaded_count), "Error setting argument 1");
+		HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], zero, 1, NULL, &global_work_size, &local_work_size, 0, NULL, NULL), "failed in clEnqueueNDRangeKernel zero");
+		clFinish(queue[ocl_gpu_id]);
+		
+	}	
 
 	HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], crk_kernel, 1, NULL, &global_work_size, &local_work_size, 0, NULL, NULL), "failed in clEnqueueNDRangeKernel");
 	clFinish( queue[ocl_gpu_id] );
