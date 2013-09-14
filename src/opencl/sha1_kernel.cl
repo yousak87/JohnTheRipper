@@ -38,13 +38,13 @@ inline uint SWAP32(uint x)
 /* Macros for reading/writing chars from int32's */
 #define LASTCHAR_BE(buf, index, val) (buf)[(index)>>2] = ((buf)[(index)>>2] & (0xffffff00U << ((((index) & 3) ^ 3) << 3))) + ((val) << ((((index) & 3) ^ 3) << 3))
 
-#if gpu_amd(DEVICE_INFO) || no_byte_addressable(DEVICE_INFO)
+//#if gpu_amd(DEVICE_INFO) || no_byte_addressable(DEVICE_INFO)
 /* 32-bit stores */
 #define PUTCHAR_BE(buf, index, val) (buf)[(index)>>2] = ((buf)[(index)>>2] & ~(0xffU << ((((index) & 3) ^ 3) << 3))) + ((val) << ((((index) & 3) ^ 3) << 3))
-#else
+//#else
 /* Byte-adressed stores */
-#define PUTCHAR_BE(buf, index, val) ((uchar*)(buf))[(index) ^ 3] = (val)
-#endif
+//#define PUTCHAR_BE(buf, index, val) ((uchar*)(buf))[(index) ^ 3] = (val)
+//#endif
 
 #define INIT_A			0x67452301
 #define INIT_B			0xefcdab89
@@ -313,6 +313,16 @@ __kernel void sha1_self_test(__global uint* keys, __global const ulong *index, _
 	digest[gid + 4 * num_keys] = SWAP32(output[4]);
 }
 
+__kernel void zero(__global uint *outKeyIdx, uint num_loaded_hashes) {
+	uint i;
+	uint gid = get_global_id(0);
+	uint num_keys = get_global_size(0);
+	for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {	
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes] = 0;
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes + num_loaded_hashes] = 0;
+	}
+}
+
 __kernel void sha1_om(__global uint* keys,
 		      __global const ulong *index,
 		      __global uint *loaded_hashes,
@@ -356,11 +366,6 @@ __kernel void sha1_om(__global uint* keys,
 
 	PUTCHAR_BE(W, len, 0x80);
 	W[15] = len << 3;
-
-	if(gid < num_loaded_hashes)
-		for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++)
-			outKeyIdx[(i*num_keys + gid)] = 0;
-	barrier(CLK_GLOBAL_MEM_FENCE);
 
 	sha1_init(output);
 	sha1_block(W, output);
@@ -428,12 +433,11 @@ __kernel void sha1_mm(__global uint* keys,
 		for(i = 0; i < 3; i++)
 			activeRangePos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
+		if(gid==1)
+			for (i = 0; i < num_loaded_hashes; i++)
+				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+		barrier(CLK_GLOBAL_MEM_FENCE);
 	}
-
-	if(gid==1)
-		for (i = 0; i < num_loaded_hashes; i++)
-			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
-	barrier(CLK_GLOBAL_MEM_FENCE);
 
 	keys += base >> 6;
 
