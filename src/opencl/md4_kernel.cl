@@ -59,7 +59,7 @@
  * global to local (thread) memory. Break the key into 16 32-bit (uint)
  * words. MD4 hash of a key is 128 bit (uint4). */
 
-void md4_encrypt(__private uint *hash, __private uint *W, uint len) {
+inline void md4_encrypt(__private uint *hash, __private uint *W, uint len) {
 
 	PUTCHAR(W, len, 0x80);
 	W[14] = len << 3;
@@ -125,7 +125,7 @@ void md4_encrypt(__private uint *hash, __private uint *W, uint len) {
 
 }
 
-void cmp( __global uint *loaded_hashes,
+inline void cmp( __global uint *loaded_hashes,
 	  __local uint *bitmap0,
 	  __local uint *bitmap1,
 	  __local uint *bitmap2,
@@ -216,11 +216,11 @@ __kernel void zero(__global uint *outKeyIdx, uint num_loaded_hashes) {
 	uint i;
 	uint gid = get_global_id(0);
 	uint num_keys = get_global_size(0);
-	for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {	
+	for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {
 			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes] = 0;
 			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes + num_loaded_hashes] = 0;
 	}
-  
+
 }
 __kernel void md4_om(__global const uint *keys,
 			    __global const ulong *index,
@@ -233,7 +233,6 @@ __kernel void md4_om(__global const uint *keys,
 	uint gid = get_global_id(0);
 	uint W[16] = { 0 };
 	uint i;
-	uint num_keys = get_global_size(0);
 	uint lid =get_local_id(0);
 	ulong base = index[gid];
 	uint len = base & 63;
@@ -282,7 +281,6 @@ __kernel void md4_nnn(__global const uint *keys,
 {
 	uint gid = get_global_id(0), lid = get_local_id(0);
 	uint W[16] = { 0 };
-	uint num_keys = get_global_size(0);
 	ulong base = index[gid];
 	uint len = base & 63;
 	uint hash[4];
@@ -330,7 +328,7 @@ __kernel void md4_nnn(__global const uint *keys,
 		for(i = 0; i < 3; i++)
 			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
-		
+
 		if(gid==1)
 			for (i = 0; i < num_loaded_hashes; i++)
 				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
@@ -384,7 +382,6 @@ __kernel void md4_cnn(__global const uint *keys,
 {
 	uint gid = get_global_id(0), lid = get_local_id(0);
 	uint W[16] = { 0 };
-	uint num_keys = get_global_size(0);
 	ulong base = index[gid];
 	uint len = base & 63;
 	uint hash[4];
@@ -406,7 +403,7 @@ __kernel void md4_cnn(__global const uint *keys,
 		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
 		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos;
 	}
-	
+
 	start = msk_ctx[0].ranges[activeRangePos[0]].start;
 
 	// Parallel load , works only if LWS is 64
@@ -433,7 +430,7 @@ __kernel void md4_cnn(__global const uint *keys,
 		for(i = 0; i < 3; i++)
 			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
-		
+
 		if(gid==1)
 			for (i = 0; i < num_loaded_hashes; i++)
 				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
@@ -486,7 +483,6 @@ __kernel void md4_ccc(__global const uint *keys,
 {
 	uint gid = get_global_id(0), lid = get_local_id(0);
 	uint W[16] = { 0 };
-	uint num_keys = get_global_size(0);
 	ulong base = index[gid];
 	uint len = base & 63;
 	uint hash[4];
@@ -529,7 +525,7 @@ __kernel void md4_ccc(__global const uint *keys,
 		for(i = 0; i < 3; i++)
 			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
-		
+
 		if(gid==1)
 			for (i = 0; i < num_loaded_hashes; i++)
 				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;

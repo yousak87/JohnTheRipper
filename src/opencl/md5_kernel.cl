@@ -64,7 +64,7 @@
  * global to local (thread) memory. Break the key into 16 32-bit (uint)
  * words. MD5 hash of a key is 128 bit (uint4). */
 
-void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
+inline void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 
 	hash[0].s0 = 0x67452301;
 	hash[0].s1 = 0xefcdab89;
@@ -145,7 +145,7 @@ void raw_md5_encrypt(__private uint *W, __private uint4 *hash, int len) {
 
 }
 
- void cmp(__global const uint *loaded_hashes,
+inline void cmp(__global const uint *loaded_hashes,
 	  __local uint *bitmap0,
 	  __local uint *bitmap1,
 	  __local uint *bitmap2,
@@ -240,11 +240,11 @@ __kernel void zero(__global uint *outKeyIdx, uint num_loaded_hashes) {
 	uint i;
 	uint gid = get_global_id(0);
 	uint num_keys = get_global_size(0);
-	for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {	
+	for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {
 			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes] = 0;
 			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes + num_loaded_hashes] = 0;
 	}
-  
+
 }
 
 /* For other modes except mask mode*/
@@ -256,7 +256,6 @@ __kernel void md5_om(__global const uint *keys,
 			    __global struct bitmap_context_global *bitmap2)
 {
 	uint4 hash;
-	uint num_keys = get_global_size(0);
 	uint lid = get_local_id(0);
 	uint gid = get_global_id(0);
 	ulong base = index[gid];
@@ -312,14 +311,13 @@ __kernel void md5_nnn(__global uint *keys,
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
-	uint num_keys = get_global_size(0);
 	ulong base = index[gid];
 	uint len = base & 63;
 	uint W[16] = { 0 };
 	uint num_loaded_hashes = loaded_hashes[0];
 	uchar activeRangePos[3], rangeNumChars[3], activeCharPos[3];
 
-	int i, ii, j, k, ctr;
+	uint i, ii, j, k, ctr;
 
 	__local uchar ranges[4 * MAX_GPU_CHARS];
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
@@ -333,7 +331,7 @@ __kernel void md5_nnn(__global uint *keys,
 
 	for(i = 0; i < 3; i++) {
 		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
-		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos; 
+		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos;
 	}
 
 	// Parallel load , works only if LWS is 64
@@ -362,7 +360,7 @@ __kernel void md5_nnn(__global uint *keys,
 		for(i = 0; i < 3; i++)
 			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
-		
+
 		if(gid==1)
 			for (i = 0; i < num_loaded_hashes; i++)
 				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
@@ -418,14 +416,13 @@ __kernel void md5_ccc(__global uint *keys,
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
-	uint num_keys = get_global_size(0);
 	ulong base = index[gid];
 	uint len = base & 63;
 	uint W[16] = { 0 };
 	uint num_loaded_hashes = loaded_hashes[0];
 	uchar activeRangePos[3], rangeNumChars[3], start[3], activeCharPos[3];
 
-	int i, j, k, ctr, ii;
+	uint i, j, k, ctr, ii;
 
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
 	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
@@ -463,7 +460,7 @@ __kernel void md5_ccc(__global uint *keys,
 		for(i = 0; i < 3; i++)
 			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
-		
+
 		if(gid==1)
 			for (i = 0; i < num_loaded_hashes; i++)
 				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
@@ -519,14 +516,13 @@ __kernel void md5_cnn(__global uint *keys,
 {
 	uint4 hash;
 	uint gid = get_global_id(0), lid = get_local_id(0);
-	uint num_keys = get_global_size(0);
 	ulong base = index[gid];
 	uint len = base & 63;
 	uint W[16] = { 0 };
 	uint num_loaded_hashes = loaded_hashes[0];
 	uchar activeRangePos[3], rangeNumChars[3], start, activeCharPos[3];
 
-	int i, ii, j, k, ctr;
+	uint i, ii, j, k, ctr;
 
 	__local uchar ranges[2 * MAX_GPU_CHARS];
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
@@ -570,7 +566,7 @@ __kernel void md5_cnn(__global uint *keys,
 		for(i = 0; i < 3; i++)
 			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
-		
+
 		if(gid==1)
 			for (i = 0; i < num_loaded_hashes; i++)
 				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;

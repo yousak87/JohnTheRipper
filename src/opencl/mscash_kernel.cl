@@ -246,9 +246,8 @@ __kernel void mscash_om(__global uint *keys,
 		     __global struct bitmap_context_mixed *bitmap1,
 		     __global struct bitmap_context_global *bitmap2) {
 
-	int gid = get_global_id(0), i;
-	int lid = get_local_id(0);
-	int numkeys = get_global_size(0);
+	uint gid = get_global_id(0), i;
+	uint lid = get_local_id(0);
 	uint nt_buffer[16] = { 0 };
 	uint output[4] = { 0 };
 	ulong base = keyIdx[gid];
@@ -312,7 +311,6 @@ __kernel void mscash_mm(__global uint *keys,
 
 	int gid = get_global_id(0);
 	int lid = get_local_id(0);
-	int numkeys = get_global_size(0);
 	uint nt_buffer[16] = { 0 };
 	uint restore[16] = { 0 };
 	uint output[4] = { 0 };
