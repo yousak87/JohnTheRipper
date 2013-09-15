@@ -83,7 +83,7 @@ static unsigned char *mask_offsets;
 static unsigned int multiplier = 1;
 static unsigned int mask_mode = 0;
 
-cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om, zero;
+cl_kernel crk_kernel, crk_kernel_nnn, crk_kernel_cnn, crk_kernel_ccc, crk_kernel_om, zero;
 
 static unsigned int self_test = 1; // Used as a flag
 
@@ -208,7 +208,9 @@ static void done(void)
 	release_clobj();
 
 	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_nnn), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_cnn), "Release kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_ccc), "Release kernel");
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel");
 	HANDLE_CLERROR(clReleaseKernel(zero), "Release kernel");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
@@ -279,7 +281,11 @@ static void fmt_rawsha1_init(struct fmt_main *self) {
 	// create kernel to execute
 	crypt_kernel = clCreateKernel(program[ocl_gpu_id], "sha1_self_test", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
-	crk_kernel_mm = clCreateKernel(program[ocl_gpu_id], "sha1_mm", &ret_code);
+	crk_kernel_nnn = clCreateKernel(program[ocl_gpu_id], "sha1_nnn", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+	crk_kernel_cnn = clCreateKernel(program[ocl_gpu_id], "sha1_cnn", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
+	crk_kernel_ccc = clCreateKernel(program[ocl_gpu_id], "sha1_ccc", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 	crk_kernel_om = clCreateKernel(program[ocl_gpu_id], "sha1_om", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
@@ -364,6 +370,60 @@ static void set_kernel_args(cl_kernel *kernel) {
 	HANDLE_CLERROR(clSetKernelArg(zero, 0, sizeof(buffer_outKeyIdx), &buffer_outKeyIdx), "Error setting argument 0");	
 }
 
+/* crk_kernel_ccc: optimized for kernel with all 3 ranges consecutive.
+ * crk_kernel_nnn: optimized for kernel with no consecutive ranges.
+ * crk_kernel_cnn: optimized for kernel with 1st range being consecutive and remaining ranges non-consecutive.
+ *
+ * select_kernel() assumes that the active ranges are arranged according to decreasing character count, which is taken
+ * care of inside check_mask_sha1().
+ *
+ * crk_kernel_ccc used for mask types: ccc, cc, c.
+ * crk_kernel_nnn used for mask types: nnn, nnc, ncn, ncc, nc, nn, n.
+ * crk_kernel_cnn used for mask types: cnn, cnc, ccn, cn.
+ */
+
+static void select_kernel(struct mask_context *msk_ctx) {
+
+	if (!(msk_ctx->ranges[msk_ctx->activeRangePos[0]].start)) {
+		crk_kernel = crk_kernel_nnn;
+		fprintf(stderr,"Using kernel sha1_nnn...\n" );
+		return;
+	}
+
+	else {
+		crk_kernel = crk_kernel_ccc;
+
+		if ((msk_ctx->count) > 1) {
+			if (!(msk_ctx->ranges[msk_ctx->activeRangePos[1]].start)) {
+				crk_kernel = crk_kernel_cnn;
+				fprintf(stderr,"Using kernel sha1_cnn...\n" );
+				return;
+			}
+
+			else {
+				crk_kernel = crk_kernel_ccc;
+
+				/* For type ccn */
+				if ((msk_ctx->count) == 3)
+					if (!(msk_ctx->ranges[msk_ctx->activeRangePos[2]].start))  {
+						crk_kernel = crk_kernel_cnn;
+						if ((msk_ctx->ranges[msk_ctx->activeRangePos[2]].count) > 64) {
+							fprintf(stderr,"Raw-sha1-opencl failed processing mask type ccn.\n" );
+						}
+						fprintf(stderr,"Using kernel sha1_cnn...\n" );
+						return;
+					}
+
+				fprintf(stderr,"Using kernel sha1_ccc...\n" );
+				return;
+			}
+		}
+
+		fprintf(stderr,"Using kernel sha1_ccc...\n" );
+		return;
+	}
+}
+
 static void opencl_sha1_reset(struct db_main *db) {
 
 	if(db) {
@@ -395,8 +455,10 @@ static void opencl_sha1_reset(struct db_main *db) {
 
 		if (mask_mode) {
 
-			set_kernel_args(&crk_kernel_mm);
-			crk_kernel = crk_kernel_mm;
+			set_kernel_args(&crk_kernel_nnn);
+			set_kernel_args(&crk_kernel_cnn);
+			set_kernel_args(&crk_kernel_ccc);
+			select_kernel(&msk_ctx);
 			DB = db;
 		}
 

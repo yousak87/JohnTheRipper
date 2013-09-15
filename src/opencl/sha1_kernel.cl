@@ -375,7 +375,7 @@ __kernel void sha1_om(__global uint* keys,
 	    output, outKeyIdx, gid, num_loaded_hashes, 0);
 }
 
-__kernel void sha1_mm(__global uint* keys,
+__kernel void sha1_nnn(__global uint* keys,
 				__global const ulong *index,
 				__global uint *loaded_hashes,
 				__global uint *outKeyIdx,
@@ -478,6 +478,218 @@ __kernel void sha1_mm(__global uint* keys,
 		PUTCHAR_BE(restore, activeCharPos[2], ranges[k + 2 * MAX_GPU_CHARS]);
 
 		PUTCHAR_BE(restore, activeCharPos[1], ranges[MAX_GPU_CHARS]);
+		j = 0;
+
+	} while( k < rangeNumChars[2]);
+}
+
+__kernel void sha1_ccc(__global uint* keys,
+				__global const ulong *index,
+				__global uint *loaded_hashes,
+				__global uint *outKeyIdx,
+				__global struct bitmap_context_mixed *bitmap1,
+				__global struct bitmap_context_global *bitmap2,
+				__global struct mask_context *msk_ctx )
+{
+	uint W[16] = { 0 }, output[5];
+	uint restore[16] = { 0 };
+	uint temp, A, B, C, D, E;
+	uint gid = get_global_id(0);
+	uint num_keys = get_global_size(0);
+	uint lid = get_local_id(0);
+	ulong base = index[gid];
+	uint len = base & 63;
+	uint num_loaded_hashes = loaded_hashes[0];
+	uchar activeRangePos[3], rangeNumChars[3], activeCharPos[3], start[3];
+	uint i, ii, j, k, ctr;
+
+	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap2[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap3[BITMAP_SIZE_1 >> 5];
+
+	for(i = 0; i < 3; i++) {
+		activeRangePos[i] = msk_ctx[0].activeRangePos[i];
+	}
+
+	for(i = 0; i < 3; i++) {
+		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
+		start[i] = msk_ctx[0].ranges[activeRangePos[i]].start;
+		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos;
+	}
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap0[i*LWS + lid] = bitmap1[0].bitmap0[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap1[i*LWS + lid] = bitmap1[0].bitmap1[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap2[i*LWS + lid] = bitmap1[0].bitmap2[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	if(msk_ctx[0].flg_wrd) {
+		ii = outKeyIdx[gid>>2];
+		ii = (ii >> ((gid&3) << 3))&0xFF;
+		for(i = 0; i < 3; i++)
+			activeCharPos[i] += ii;
+		barrier(CLK_GLOBAL_MEM_FENCE);
+		if(gid==1)
+			for (i = 0; i < num_loaded_hashes; i++)
+				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+		barrier(CLK_GLOBAL_MEM_FENCE);
+	}
+
+	keys += base >> 6;
+
+	for (i = 0; i < (len+3)/4; i++)
+		W[i] = SWAP32(*keys++);
+
+	PUTCHAR_BE(W, len, 0x80);
+	W[15] = len << 3;
+
+	for(i = 0; i < 16; i++)
+		restore[i] = W[i];
+
+	ctr = i = j = k = 0;
+	if (rangeNumChars[2]) PUTCHAR_BE(restore, activeCharPos[2], start[2]);
+	if (rangeNumChars[1]) PUTCHAR_BE(restore, activeCharPos[1], start[1]);
+
+	do {
+		do {
+			for (i = 0; i < rangeNumChars[0]; i++) {
+				for(ii = 0; ii < 16; ii++)
+					W[ii] = restore[ii];
+				PUTCHAR_BE(W, activeCharPos[0], (start[0] + i));
+				sha1_init(output);
+				sha1_block(W, output);
+				cmp(loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap1[0].gbitmap0[0],
+				    &bitmap2[0].hashtable0[0], &bitmap1[0].loaded_next_hash[0],
+				    output, outKeyIdx, gid, num_loaded_hashes, ctr++);
+			}
+
+			j++;
+			PUTCHAR_BE(restore, activeCharPos[1], (start[1] + j));
+
+		} while ( j < rangeNumChars[1]);
+
+		k++;
+		PUTCHAR_BE(restore, activeCharPos[2], (start[2] + k));
+
+		PUTCHAR_BE(restore, activeCharPos[1], start[1]);
+		j = 0;
+
+	} while( k < rangeNumChars[2]);
+}
+
+__kernel void sha1_cnn(__global uint* keys,
+				__global const ulong *index,
+				__global uint *loaded_hashes,
+				__global uint *outKeyIdx,
+				__global struct bitmap_context_mixed *bitmap1,
+				__global struct bitmap_context_global *bitmap2,
+				__global struct mask_context *msk_ctx )
+{
+	uint W[16] = { 0 }, output[5];
+	uint restore[16] = { 0 };
+	uint temp, A, B, C, D, E;
+	uint gid = get_global_id(0);
+	uint num_keys = get_global_size(0);
+	uint lid = get_local_id(0);
+	ulong base = index[gid];
+	uint len = base & 63;
+	uint num_loaded_hashes = loaded_hashes[0];
+	uchar activeRangePos[3], rangeNumChars[3], activeCharPos[3], start;
+	uint i, ii, j, k, ctr;
+
+	__local uchar ranges[2 * MAX_GPU_CHARS];
+	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap2[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap3[BITMAP_SIZE_1 >> 5];
+
+	for(i = 0; i < 3; i++) {
+		activeRangePos[i] = msk_ctx[0].activeRangePos[i];
+	}
+
+	for(i = 0; i < 3; i++) {
+		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
+		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos;
+	}
+	
+	start = msk_ctx[0].ranges[activeRangePos[0]].start;
+
+	// Parallel load , works only if LWS is 64
+	ranges[lid] = msk_ctx[0].ranges[activeRangePos[1]].chars[lid];
+	ranges[lid + MAX_GPU_CHARS] = msk_ctx[0].ranges[activeRangePos[2]].chars[lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap0[i*LWS + lid] = bitmap1[0].bitmap0[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap1[i*LWS + lid] = bitmap1[0].bitmap1[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap2[i*LWS + lid] = bitmap1[0].bitmap2[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	if(msk_ctx[0].flg_wrd) {
+		ii = outKeyIdx[gid>>2];
+		ii = (ii >> ((gid&3) << 3))&0xFF;
+		for(i = 0; i < 3; i++)
+			activeCharPos[i] += ii;
+		barrier(CLK_GLOBAL_MEM_FENCE);
+		if(gid==1)
+			for (i = 0; i < num_loaded_hashes; i++)
+				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+		barrier(CLK_GLOBAL_MEM_FENCE);
+	}
+
+	keys += base >> 6;
+
+	for (i = 0; i < (len+3)/4; i++)
+		W[i] = SWAP32(*keys++);
+
+	PUTCHAR_BE(W, len, 0x80);
+	W[15] = len << 3;
+
+	for(i = 0; i < 16; i++)
+		restore[i] = W[i];
+
+	ctr = i = j = k = 0;
+	if (rangeNumChars[2]) PUTCHAR_BE(restore, activeCharPos[2], ranges[MAX_GPU_CHARS]);
+	if (rangeNumChars[1]) PUTCHAR_BE(restore, activeCharPos[1], ranges[0]);
+
+	do {
+		do {
+			for (i = 0; i < rangeNumChars[0]; i++) {
+				for(ii = 0; ii < 16; ii++)
+					W[ii] = restore[ii];
+				PUTCHAR_BE(W, activeCharPos[0], (start + i));
+				sha1_init(output);
+				sha1_block(W, output);
+				cmp(loaded_hashes, sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap1[0].gbitmap0[0],
+				    &bitmap2[0].hashtable0[0], &bitmap1[0].loaded_next_hash[0],
+				    output, outKeyIdx, gid, num_loaded_hashes, ctr++);
+			}
+
+			j++;
+			PUTCHAR_BE(restore, activeCharPos[1], ranges[j]);
+
+		} while ( j < rangeNumChars[1]);
+
+		k++;
+		PUTCHAR_BE(restore, activeCharPos[2], ranges[k + MAX_GPU_CHARS]);
+
+		PUTCHAR_BE(restore, activeCharPos[1], ranges[0]);
 		j = 0;
 
 	} while( k < rangeNumChars[2]);
