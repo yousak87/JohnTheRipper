@@ -512,7 +512,7 @@ static void load_mask(struct fmt_main *fmt) {
 	}
 	memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_rawmd5(&msk_ctx);
-//#if RAWMD5_DEBUG
+#if RAWMD5_DEBUG
 	int i, j;
 	for(i = 0; i < MASK_RANGES_MAX; i++)
 	    printf("%d ",msk_ctx.activeRangePos[i]);
@@ -532,7 +532,7 @@ static void load_mask(struct fmt_main *fmt) {
 			printf("START:%c",msk_ctx.ranges[msk_ctx.activeRangePos[i]].start);
 			printf("\n");
 	}
-//#endif
+#endif
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
 

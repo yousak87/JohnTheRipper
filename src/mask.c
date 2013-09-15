@@ -122,7 +122,7 @@ static void combination_util(void *arr, int data[], int start, int end, int inde
 	}
 
 	for (i = start; i <= end && end - i + 1 >= r - index; i++) {
-		data[index] = /*((struct mask_context *)arr)->ranges[i].pos*/i;
+		data[index] = i;
 		combination_util(arr, data, i + 1, end, index + 1, r, target,
 		    isOptimal);
 	}
