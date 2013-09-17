@@ -454,7 +454,7 @@ static void john_log_format(void)
 #endif
 	/* make sure the format is properly initialized */
 #ifdef HAVE_OPENCL
-	if (!(options.gpu_devices && options.fork))
+	if (!(options.gpu_devices->count && options.fork))
 #endif
 	fmt_init(database.format);
 
@@ -579,11 +579,11 @@ static void john_omp_show_info(void)
 				fprintf(stderr, "MPI in use, disabling OMP "
 				        "(see doc/README.mpi)\n");
 			omp_set_num_threads(1);
-		} else
-			if(cfg_get_bool(SECTION_OPTIONS, SUBSECTION_MPI,
-			                "MPIOMPverbose", 1) && mpi_id == 0)
-				fprintf(stderr, "Note: Running both MPI and OMP"
-				        " (see doc/README.mpi)\n");
+		} else if(john_omp_threads_orig > 1 &&
+		        cfg_get_bool(SECTION_OPTIONS, SUBSECTION_MPI,
+		                "MPIOMPverbose", 1) && mpi_id == 0)
+			fprintf(stderr, "Note: Running both MPI and OMP"
+			        " (see doc/README.mpi)\n");
 	} else
 #endif
 	if (options.fork) {
@@ -649,7 +649,7 @@ static void john_fork(void)
 			options.node_min += i;
 			options.node_max = options.node_min;
 #ifdef HAVE_OPENCL
-			if (options.gpu_devices) {
+			if (options.gpu_devices->count) {
 				// Pick device to use for this child
 				opencl_preinit();
 				ocl_gpu_id = ocl_device_list[i % opencl_get_devices()];
@@ -677,7 +677,7 @@ static void john_fork(void)
 	}
 
 #ifdef HAVE_OPENCL
-	if (options.gpu_devices) {
+	if (options.gpu_devices->count) {
 		// Pick device to use for mother process
 		opencl_preinit();
 		ocl_gpu_id = ocl_device_list[0];
@@ -899,7 +899,7 @@ static void john_load(void)
 			log_event("Loaded a total of %s", john_loaded_counts());
 			/* make sure the format is properly initialized */
 #ifdef HAVE_OPENCL
-			if (!(options.gpu_devices && options.fork))
+			if (!(options.gpu_devices->count && options.fork))
 #endif
 			fmt_init(database.format);
 			if (john_main_process)
