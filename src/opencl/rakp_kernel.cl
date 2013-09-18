@@ -2,6 +2,8 @@
    Code largely based on OpenCL SHA1 kernel by Samuele Giovanni Tonon (C) 2011, magnum (C) 2012
 
    OpenCL RAKP kernel (C) 2013 by Harrison Neal
+   Packed key buffer and other optimizations (c) magnum 2013
+
    Licensed under GPLv2
    This program comes with ABSOLUTELY NO WARRANTY, neither expressed nor implied.
    See the following for more information on the GPLv2 license:
@@ -27,7 +29,7 @@ inline uint SWAP32(uint x)
 /* Macros for reading/writing chars from int32's */
 #define LASTCHAR_BE(buf, index, val) (buf)[(index)>>2] = ((buf)[(index)>>2] & (0xffffff00U << ((((index) & 3) ^ 3) << 3))) + ((val) << ((((index) & 3) ^ 3) << 3))
 
-#if gpu_amd(DEVICE_INFO) || no_byte_addressable(DEVICE_INFO)
+#if no_byte_addressable(DEVICE_INFO)
 /* 32-bit stores */
 #define PUTCHAR_BE(buf, index, val) (buf)[(index)>>2] = ((buf)[(index)>>2] & ~(0xffU << ((((index) & 3) ^ 3) << 3))) + ((val) << ((((index) & 3) ^ 3) << 3))
 #else
@@ -225,16 +227,19 @@ __kernel
 void rakp_kernel(
 	__constant	uint* salt,
 	__global	uint* keys,
+	__global const	uint* index,
 	__global	uint* digest
 ) {
-	uint W[16] = { 0 }, K[16] = { 0 }, stage1[5], stage2[5];
+	uint W[16], K[16] = { 0 }, stage1[5], stage2[5];
 	uint temp, A, B, C, D, E;
 	uint gid = get_global_id(0);
 	uint i;
+	uint base = index[gid];
+	uint len = ((base & 63) + 3) / 4;
 
-	keys += 16*gid;
+	keys += base >> 6;
 
-	for (i = 0; i < 16; i++)
+	for (i = 0; i < len; i++)
 		K[i] = SWAP32(keys[i]);
 
 	sha1_init(stage1);
@@ -244,11 +249,11 @@ void rakp_kernel(
 	sha1_block(W, stage1);
 
 	for (i = 0; i < 16; i++)
-		W[i] = SWAP32(salt[i]);
+		W[i] = salt[i];
 	sha1_block(W, stage1);
 
 	for (i = 16; i < 32; i++)
-		W[i-16] = SWAP32(salt[i]);
+		W[i-16] = salt[i];
 	sha1_block(W, stage1);
 
 	sha1_init(stage2);
@@ -266,5 +271,5 @@ void rakp_kernel(
 	sha1_block(W, stage2);
 
 	for (i = 0; i < 5; i++)
-		digest[gid*5 + i] = SWAP32(stage2[i]);
+		digest[gid*5 + i] = stage2[i];
 }
