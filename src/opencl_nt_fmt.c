@@ -329,7 +329,6 @@ static void init(struct fmt_main *self){
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)
 			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
-		fprintf(stderr, "%d\n", multiplier);
 	}
 
 	if (options.verbosity > 2)
