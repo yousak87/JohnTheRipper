@@ -363,13 +363,15 @@ __kernel void nt_mm(const __global uint *keys,
 	uint gid = get_global_id(0);
 	uint lid = get_local_id(0);
 	uint nt_buffer[12] = { 0 };
-	uint md4_size = 0;
+	ulong base = key_idx[gid];
+	uint md4_size = base & 63;
 	uint num_keys = get_global_size(0);
 	uint num_loaded_hashes = loaded_hashes[0];
+	uint nt_index = 0;
 	uchar activeRangePos[3], rangeNumChars[3];
 	uint i, ii, j, k, ctr;
 
-	uint hash[4];
+	uint hash[4], key;
 
 	__local uchar ranges[3 * MAX_GPU_CHARS];
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
@@ -401,9 +403,17 @@ __kernel void nt_mm(const __global uint *keys,
 	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
 		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
 
-
-
 	barrier(CLK_LOCAL_MEM_FENCE);
+	
+	keys += base >> 6;
+		
+	for (i = 0; i < (md4_size+3)/4; i++){
+		key = *keys++;
+		nt_buffer[nt_index++] = (key & 0xffU) | (((key >> 8) & 0xffU) << 16);
+		nt_buffer[nt_index++] = ((key >> 16) & 0xffU) | (((key >> 24) & 0xffU) << 16) ;
+	}
+	nt_buffer[md4_size >> 1] = (0x80 << ((md4_size & 1) << 4)) | nt_buffer[md4_size >> 1];
+	md4_size = md4_size << 4;
 
 	if(msk_ctx[0].flg_wrd) {
 		ii = outKeyIdx[gid>>2];
@@ -417,7 +427,7 @@ __kernel void nt_mm(const __global uint *keys,
 			barrier(CLK_GLOBAL_MEM_FENCE);
 	}
 
-	coalasced_load(nt_buffer, keys, &md4_size, gid, num_keys);
+	//coalasced_load(nt_buffer, keys, &md4_size, gid, num_keys);
 
 	ctr = i = j = k = 0;
 	if (rangeNumChars[2]) PUTCHAR(nt_buffer, activeRangePos[2], ranges[2 * MAX_GPU_CHARS]);
