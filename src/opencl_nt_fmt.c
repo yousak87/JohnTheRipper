@@ -121,7 +121,8 @@ static struct bitmap_context_global *bitmap2;
 cl_mem  buffer_mask_gpu;
 static struct mask_context msk_ctx;
 static struct db_main *DB;
-static unsigned char *mask_offsets, multiplier = 1;
+static unsigned char *mask_offsets;
+static unsigned int multiplier = 1;
 
 static unsigned int mask_mode = 0;
 static unsigned int benchmark = 1;
@@ -328,6 +329,7 @@ static void init(struct fmt_main *self){
 		multiplier = 1;
 		for (i = 0; i < msk_ctx.count; i++)
 			multiplier *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
+		fprintf(stderr, "%d\n", multiplier);
 	}
 
 	if (options.verbosity > 2)
@@ -704,7 +706,7 @@ static void load_mask(struct fmt_main *fmt) {
 	}
 	memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_nt(&msk_ctx);
-
+	
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
 
