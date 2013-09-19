@@ -352,7 +352,8 @@ __kernel void nt_om(const __global uint *keys,
 
 }
 
-__kernel void nt_mm(const __global uint *keys,
+/* When all ranges are non-consective. */
+__kernel void nt_nnn(const __global uint *keys,
 		    const __global ulong *key_idx,
 		    const __global uint *loaded_hashes,
 		          __global uint *outKeyIdx,
@@ -453,6 +454,214 @@ __kernel void nt_mm(const __global uint *keys,
 		PUTCHAR(nt_buffer, activeCharPos[2], ranges[k + 2 * MAX_GPU_CHARS]);
 
 		PUTCHAR(nt_buffer, activeCharPos[1], ranges[MAX_GPU_CHARS]);
+		j = 0;
+
+	} while( k < rangeNumChars[2]);
+}
+
+__kernel void nt_ccc(const __global uint *keys,
+		    const __global ulong *key_idx,
+		    const __global uint *loaded_hashes,
+		          __global uint *outKeyIdx,
+		    const __global struct bitmap_context_mixed *bitmap1,
+		    const __global struct bitmap_context_global *bitmap2,
+		    const __global struct mask_context *msk_ctx)
+{
+	uint gid = get_global_id(0);
+	uint lid = get_local_id(0);
+	uint nt_buffer[12] = { 0 };
+	ulong base = key_idx[gid];
+	uint md4_size = base & 63;
+	uint num_keys = get_global_size(0);
+	uint num_loaded_hashes = loaded_hashes[0];
+	uint nt_index = 0;
+	uchar activeRangePos[3], rangeNumChars[3], activeCharPos[3], start[3];
+	uint i, ii, j, k, ctr;
+
+	uint hash[4], key;
+
+	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap2[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap3[BITMAP_SIZE_1 >> 5];
+
+	for(i = 0; i < 3; i++) {
+		activeRangePos[i] = msk_ctx[0].activeRangePos[i];
+	}
+
+	for(i = 0; i < 3; i++) {
+		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
+		start[i] = msk_ctx[0].ranges[activeRangePos[i]].start;
+		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos;
+	}
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap0[i*LWS + lid] = bitmap1[0].bitmap0[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap1[i*LWS + lid] = bitmap1[0].bitmap1[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap2[i*LWS + lid] = bitmap1[0].bitmap2[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+	
+	keys += base >> 6;
+		
+	for (i = 0; i < (md4_size+3)/4; i++){
+		key = *keys++;
+		nt_buffer[nt_index++] = (key & 0xffU) | (((key >> 8) & 0xffU) << 16);
+		nt_buffer[nt_index++] = ((key >> 16) & 0xffU) | (((key >> 24) & 0xffU) << 16) ;
+	}
+	nt_buffer[md4_size >> 1] = (0x80 << ((md4_size & 1) << 4)) | nt_buffer[md4_size >> 1];
+	md4_size = md4_size << 4;
+
+	if(msk_ctx[0].flg_wrd) {
+		ii = outKeyIdx[gid>>2];
+		ii = (ii >> ((gid&3) << 3))&0xFF;
+		for(i = 0; i < 3; i++)
+			activeCharPos[i] += ii;
+		barrier(CLK_GLOBAL_MEM_FENCE);
+		if(gid==1)
+			for (i = 0; i < num_loaded_hashes; i++)
+				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+			barrier(CLK_GLOBAL_MEM_FENCE);
+	}
+
+	ctr = i = j = k = 0;
+	if (rangeNumChars[2]) PUTCHAR(nt_buffer, activeCharPos[2], start[2]);
+	if (rangeNumChars[1]) PUTCHAR(nt_buffer, activeCharPos[1], start[1]);
+
+	do {
+		do {
+			for (i = 0; i < rangeNumChars[0]; i++) {
+				PUTCHAR(nt_buffer, activeCharPos[0], (start[0] + i));
+				nt_crypt(hash, nt_buffer, md4_size);
+				cmp(loaded_hashes,
+				    sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap1[0].gbitmap0[0],
+				    &bitmap2[0].hashtable0[0], &bitmap1[0].loaded_next_hash[0],
+				    hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
+			}
+
+			j++;
+			PUTCHAR(nt_buffer, activeCharPos[1], (start[1] + j));
+
+		} while ( j < rangeNumChars[1]);
+
+		k++;
+		PUTCHAR(nt_buffer, activeCharPos[2], (start[2] + k));
+
+		PUTCHAR(nt_buffer, activeCharPos[1], start[1]);
+		j = 0;
+
+	} while( k < rangeNumChars[2]);
+}
+
+__kernel void nt_cnn(const __global uint *keys,
+		    const __global ulong *key_idx,
+		    const __global uint *loaded_hashes,
+		          __global uint *outKeyIdx,
+		    const __global struct bitmap_context_mixed *bitmap1,
+		    const __global struct bitmap_context_global *bitmap2,
+		    const __global struct mask_context *msk_ctx)
+{
+	uint gid = get_global_id(0);
+	uint lid = get_local_id(0);
+	uint nt_buffer[12] = { 0 };
+	ulong base = key_idx[gid];
+	uint md4_size = base & 63;
+	uint num_keys = get_global_size(0);
+	uint num_loaded_hashes = loaded_hashes[0];
+	uint nt_index = 0;
+	uchar activeRangePos[3], rangeNumChars[3], activeCharPos[3], start;
+	uint i, ii, j, k, ctr;
+
+	uint hash[4], key;
+
+	__local uchar ranges[2 * MAX_GPU_CHARS];
+	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap2[BITMAP_SIZE_1 >> 5];
+	__local uint sbitmap3[BITMAP_SIZE_1 >> 5];
+
+	for(i = 0; i < 3; i++) {
+		activeRangePos[i] = msk_ctx[0].activeRangePos[i];
+	}
+
+	for(i = 0; i < 3; i++) {
+		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
+		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos;
+	}
+	
+	start = msk_ctx[0].ranges[activeRangePos[0]].start;
+
+	// Parallel load , works only if LWS is 64
+	ranges[lid] = msk_ctx[0].ranges[activeRangePos[1]].chars[lid];
+	ranges[lid + MAX_GPU_CHARS] = msk_ctx[0].ranges[activeRangePos[2]].chars[lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap0[i*LWS + lid] = bitmap1[0].bitmap0[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap1[i*LWS + lid] = bitmap1[0].bitmap1[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5) / LWS); i++)
+		sbitmap2[i*LWS + lid] = bitmap1[0].bitmap2[i*LWS + lid];
+
+	for(i = 0; i < ((BITMAP_SIZE_1 >> 5)/ LWS); i++)
+		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+	
+	keys += base >> 6;
+		
+	for (i = 0; i < (md4_size+3)/4; i++){
+		key = *keys++;
+		nt_buffer[nt_index++] = (key & 0xffU) | (((key >> 8) & 0xffU) << 16);
+		nt_buffer[nt_index++] = ((key >> 16) & 0xffU) | (((key >> 24) & 0xffU) << 16) ;
+	}
+	nt_buffer[md4_size >> 1] = (0x80 << ((md4_size & 1) << 4)) | nt_buffer[md4_size >> 1];
+	md4_size = md4_size << 4;
+
+	if(msk_ctx[0].flg_wrd) {
+		ii = outKeyIdx[gid>>2];
+		ii = (ii >> ((gid&3) << 3))&0xFF;
+		for(i = 0; i < 3; i++)
+			activeCharPos[i] += ii;
+		barrier(CLK_GLOBAL_MEM_FENCE);
+		if(gid==1)
+			for (i = 0; i < num_loaded_hashes; i++)
+				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+			barrier(CLK_GLOBAL_MEM_FENCE);
+	}
+
+	ctr = i = j = k = 0;
+	if (rangeNumChars[2]) PUTCHAR(nt_buffer, activeCharPos[2], ranges[MAX_GPU_CHARS]);
+	if (rangeNumChars[1]) PUTCHAR(nt_buffer, activeCharPos[1], ranges[0]);
+
+	do {
+		do {
+			for (i = 0; i < rangeNumChars[0]; i++) {
+				PUTCHAR(nt_buffer, activeCharPos[0], (start + i));
+				nt_crypt(hash, nt_buffer, md4_size);
+				cmp(loaded_hashes,
+				    sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap1[0].gbitmap0[0],
+				    &bitmap2[0].hashtable0[0], &bitmap1[0].loaded_next_hash[0],
+				    hash, outKeyIdx, num_loaded_hashes, gid, ctr++);
+			}
+
+			j++;
+			PUTCHAR(nt_buffer, activeCharPos[1], ranges[j]);
+
+		} while ( j < rangeNumChars[1]);
+
+		k++;
+		PUTCHAR(nt_buffer, activeCharPos[2], ranges[k + MAX_GPU_CHARS]);
+
+		PUTCHAR(nt_buffer, activeCharPos[1], ranges[0]);
 		j = 0;
 
 	} while( k < rangeNumChars[2]);

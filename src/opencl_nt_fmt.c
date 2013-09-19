@@ -109,7 +109,6 @@ static cl_uint *bbbs, *res_hashes;
 static unsigned int *saved_plain;
 static uint64_t *saved_idx, key_idx = 0;
 static int max_key_length = 0;
-static char get_key_saved[PLAINTEXT_LENGTH+1];
 static unsigned int num_keys = 0;
 static int have_full_hashes;
 
@@ -127,7 +126,7 @@ static unsigned char *mask_offsets, multiplier = 1;
 static unsigned int mask_mode = 0;
 static unsigned int benchmark = 1;
 
-cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om, zero;
+cl_kernel crk_kernel, crk_kernel_nnn, crk_kernel_cnn, crk_kernel_ccc, crk_kernel_om, zero;
 
 static int crypt_all_self_test(int *pcount, struct db_salt *_salt);
 static int crypt_all(int *pcount, struct db_salt *_salt);
@@ -149,7 +148,7 @@ static void release_clobj(void)
 	HANDLE_CLERROR(clReleaseMemObject(buffer_out), "Release mem setting");
 	HANDLE_CLERROR(clReleaseMemObject(pinned_bbbs), "Release mem out");
         HANDLE_CLERROR(clReleaseMemObject(pinned_saved_keys), "Release mem out");
-	 HANDLE_CLERROR(clReleaseMemObject(pinned_saved_idx), "Release mem out");
+	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_idx), "Release mem out");
 	HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release mask");
 
 	MEM_FREE(res_hashes);
@@ -174,10 +173,66 @@ static void done(void)
 	release_clobj();
 
 	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel self_test");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel mask mode");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_nnn), "Release kernel mask mode nnn");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_cnn), "Release kernel mask mode cnn");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_ccc), "Release kernel mask mode ccc");
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel non-mask mode");
 	HANDLE_CLERROR(clReleaseKernel(zero), "Release kernel zero");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
+}
+
+/* crk_kernel_ccc: optimized for kernel with all 3 ranges consecutive.
+ * crk_kernel_nnn: optimized for kernel with no consecutive ranges.
+ * crk_kernel_cnn: optimized for kernel with 1st range being consecutive and remaining ranges non-consecutive.
+ *
+ * select_kernel() assumes that the active ranges are arranged according to decreasing character count, which is taken
+ * care of inside check_mask_rawmd5().
+ *
+ * crk_kernel_ccc used for mask types: ccc, cc, c.
+ * crk_kernel_nnn used for mask types: nnn, nnc, ncn, ncc, nc, nn, n.
+ * crk_kernel_cnn used for mask types: cnn, cnc, ccn, cn.
+ */
+
+static void select_kernel(struct mask_context *msk_ctx) {
+
+	if (!(msk_ctx->ranges[msk_ctx->activeRangePos[0]].start)) {
+		crk_kernel = crk_kernel_nnn;
+		fprintf(stderr,"Using kernel nt_nnn...\n" );
+		return;
+	}
+
+	else {
+		crk_kernel = crk_kernel_ccc;
+
+		if ((msk_ctx->count) > 1) {
+			if (!(msk_ctx->ranges[msk_ctx->activeRangePos[1]].start)) {
+				crk_kernel = crk_kernel_cnn;
+				fprintf(stderr,"Using kernel nt_cnn...\n" );
+				return;
+			}
+
+			else {
+				crk_kernel = crk_kernel_ccc;
+
+				/* For type ccn */
+				if ((msk_ctx->count) == 3)
+					if (!(msk_ctx->ranges[msk_ctx->activeRangePos[2]].start))  {
+						crk_kernel = crk_kernel_cnn;
+						if ((msk_ctx->ranges[msk_ctx->activeRangePos[2]].count) > 64) {
+							fprintf(stderr,"nt-opencl failed processing mask type ccn.\n" );
+						}
+						fprintf(stderr,"Using kernel nt_cnn...\n" );
+						return;
+					}
+
+				fprintf(stderr,"Using kernel nt_ccc...\n" );
+				return;
+			}
+		}
+
+		fprintf(stderr,"Using kernel nt_ccc...\n" );
+		return;
+	}
 }
 
 // TODO: Use concurrent memory copy & execute
@@ -204,11 +259,17 @@ static void init(struct fmt_main *self){
 	crypt_kernel = clCreateKernel( program[ocl_gpu_id], "nt_self_test", &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
 
-	crk_kernel_mm = clCreateKernel( program[ocl_gpu_id], "nt_mm", &ret_code );
-	HANDLE_CLERROR(ret_code,"Error creating kernel");
+	crk_kernel_nnn = clCreateKernel( program[ocl_gpu_id], "nt_nnn", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel nnn");
+	
+	crk_kernel_cnn = clCreateKernel( program[ocl_gpu_id], "nt_cnn", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel cnn");
+	
+	crk_kernel_ccc = clCreateKernel( program[ocl_gpu_id], "nt_ccc", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel ccc");
 
 	crk_kernel_om = clCreateKernel( program[ocl_gpu_id], "nt_om", &ret_code );
-	HANDLE_CLERROR(ret_code,"Error creating kernel");
+	HANDLE_CLERROR(ret_code, "Error creating kernel");
 	
 	zero = clCreateKernel(program[ocl_gpu_id], "zero", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
@@ -218,20 +279,14 @@ static void init(struct fmt_main *self){
 	while (local_work_size > maxsize)
 		local_work_size >>= 1;
 
-	//pinned_saved_keys = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, (PLAINTEXT_LENGTH+1)*global_work_size, NULL, &ret_code);
-	//HANDLE_CLERROR(ret_code,"Error creating page-locked memory");
 	pinned_bbbs = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,4*global_work_size, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code,"Error creating page-locked memory");
 
 	res_hashes = mem_alloc(sizeof(cl_uint) * 3 * global_work_size);
-	//saved_plain = (char*) clEnqueueMapBuffer(queue[ocl_gpu_id], pinned_saved_keys, CL_TRUE, CL_MAP_WRITE | CL_MAP_READ, 0, (PLAINTEXT_LENGTH+1)*global_work_size, 0, NULL, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code,"Error mapping page-locked memory");
 	bbbs = (cl_uint*)clEnqueueMapBuffer(queue[ocl_gpu_id], pinned_bbbs , CL_TRUE, CL_MAP_READ, 0, 4*global_work_size, 0, NULL, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code,"Error mapping page-locked memory");
 
-	// 6. Create and set arguments
-	//buffer_keys = clCreateBuffer( context[ocl_gpu_id], CL_MEM_READ_ONLY,(PLAINTEXT_LENGTH+1)*global_work_size, NULL, &ret_code );
-	//HANDLE_CLERROR(ret_code,"Error creating buffer argument");
 	buffer_keys = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, BUFSIZE * global_work_size, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating buffer argument buffer_keys");
 	buffer_idx = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(uint64_t) * global_work_size, NULL, &ret_code);
@@ -500,8 +555,10 @@ static void opencl_nt_reset(struct db_main *db) {
 		HANDLE_CLERROR(ret_code, "Error creating buffer arg loaded_hashes\n");
 
 		if(mask_mode) {
-			setKernelArgs(&crk_kernel_mm);
-			crk_kernel = crk_kernel_mm;
+			setKernelArgs(&crk_kernel_nnn);
+			setKernelArgs(&crk_kernel_ccc);
+			setKernelArgs(&crk_kernel_cnn);
+			select_kernel(&msk_ctx);
 			DB = db;
 		}
 		else {
@@ -650,38 +707,6 @@ static void load_mask(struct fmt_main *fmt) {
 
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
-/*
-static void set_key(char *key, int index)
-{
-	int length = -1;
-
-	do {
-		length++;
-		//Save keys in a coalescing friendly way
-		saved_plain[(length/4)*global_work_size*4+index*4+length%4] = key[length];
-	}
-	while(key[length]);
-	//Calculate max key length of this chunk
-	if (length > max_key_length)
-		max_key_length = length;
-
-	num_keys++;
-}
-
-static char *get_key_self_test(int index)
-{
-	int length = -1;
-
-	do
-	{
-		length++;
-		//Decode saved key
-		get_key_saved[length] = saved_plain[(length/4)*global_work_size*4+index*4+length%4];
-	}
-	while(get_key_saved[length]);
-
-	return get_key_saved;
-}*/
 
 static void set_key(char *_key, int index)
 {
@@ -714,49 +739,6 @@ static char *get_key_self_test(int index)
 
 	return out;
 }
-/*
-static void passgen(int ctr, int offset, char *key) {
-	int i, j, k;
-
-	offset = msk_ctx.flg_wrd ? offset : 0;
-
-	i =  ctr % msk_ctx.ranges[msk_ctx.activeRangePos[0]].count;
-	key[msk_ctx.activeRangePos[0] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[0]].chars[i];
-
-	if (msk_ctx.ranges[msk_ctx.activeRangePos[1]].count) {
-		j = (ctr / msk_ctx.ranges[msk_ctx.activeRangePos[0]].count) % msk_ctx.ranges[msk_ctx.activeRangePos[1]].count;
-		key[msk_ctx.activeRangePos[1] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[1]].chars[j];
-	}
-	if (msk_ctx.ranges[msk_ctx.activeRangePos[2]].count) {
-		k = (ctr / (msk_ctx.ranges[msk_ctx.activeRangePos[0]].count * msk_ctx.ranges[msk_ctx.activeRangePos[1]].count)) % msk_ctx.ranges[msk_ctx.activeRangePos[2]].count;
-		key[msk_ctx.activeRangePos[2] + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[2]].chars[k];
-	}
-}
-
-static char *get_key(int index)
-{
-	int length = -1;
-	int ctr = 0, mask_offset = 0, flag = 0;
-	if ((index < loaded_count) && cmp_out) {
-		ctr = outKeyIdx[index + loaded_count];
-		index = outKeyIdx[index] & 0x7fffffff;
-		mask_offset = mask_offsets[index];
-		flag = 1;
-	}
-	index = (index > num_keys)? (num_keys?num_keys-1:0): index;
-	do
-	{
-		length++;
-		//Decode saved key
-		get_key_saved[length] = saved_plain[(length/4)*global_work_size*4+index*4+length%4];
-	}
-	while(get_key_saved[length]);
-
-	if(cmp_out && flag && mask_mode)
-		passgen(ctr, mask_offset, get_key_saved);
-
-	return get_key_saved;
-}*/
 
 static void passgen(int ctr, int offset, char *key) {
 	int i, j, k;
@@ -812,7 +794,6 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 {
 	int count = *pcount;
 	
-	// Fill params. Copy only necesary data
 	// copy keys to the device
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0, 4 * key_idx, saved_plain, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_keys");
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, sizeof(uint64_t) * global_work_size, saved_idx, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_idx");
@@ -833,8 +814,7 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
 	unsigned int i;
-	int key_length_mul_4 = (((max_key_length+1) + 3)/4)*4;
-
+	
 	if(mask_mode)
 		*pcount *= multiplier;
 
@@ -862,7 +842,6 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 		HANDLE_CLERROR(clSetKernelArg(zero, 1, sizeof(uint), &loaded_count), "Error setting argument 1");
 		HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], zero, 1, NULL, &global_work_size, &local_work_size, 0, NULL, NULL), "failed in clEnqueueNDRangeKernel zero");
 		clFinish(queue[ocl_gpu_id]);
-		
 	}	
 
 	// Execute method
