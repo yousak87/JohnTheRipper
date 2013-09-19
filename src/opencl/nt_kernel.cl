@@ -257,16 +257,25 @@ inline void cmp( __global const uint *loaded_hashes,
 
  }
 
-__kernel void nt_self_test(const __global uint *keys , __global uint *output)
+__kernel void nt_self_test(const __global uint *keys, const __global ulong *key_idx, __global uint *output)
 {
 	uint gid = get_global_id(0);
 	uint nt_buffer[12] = { 0 };
-	uint md4_size = 0;
 	uint num_keys = get_global_size(0);
-
-	uint hash[4];
-
-	coalasced_load(nt_buffer, keys, &md4_size, gid, num_keys);
+	ulong base = key_idx[gid];
+	uint md4_size = base & 63, i;
+	uint hash[4], key;
+	uint nt_index = 0;
+	
+	keys += base >> 6;
+		
+	for (i = 0; i < (md4_size+3)/4; i++){
+		key = *keys++;
+		nt_buffer[nt_index++] = (key & 0xffU) | (((key >> 8) & 0xffU) << 16);
+		nt_buffer[nt_index++] = ((key >> 16) & 0xffU) | (((key >> 24) & 0xffU) << 16) ;
+	}
+	nt_buffer[md4_size >> 1] = (0x80 << ((md4_size & 1) << 4)) | nt_buffer[md4_size >> 1];
+	md4_size = md4_size << 4;
 	nt_crypt(hash, nt_buffer, md4_size);
 
 	//Coalescing writes
@@ -276,7 +285,19 @@ __kernel void nt_self_test(const __global uint *keys , __global uint *output)
 	output[3*num_keys+gid] = hash[3];
 }
 
+__kernel void zero(__global uint *outKeyIdx, uint num_loaded_hashes) {
+	uint i;
+	uint gid = get_global_id(0);
+	uint num_keys = get_global_size(0);
+	for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {	
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes] = 0;
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes + num_loaded_hashes] = 0;
+	}
+  
+}
+
 __kernel void nt_om(const __global uint *keys,
+		    const __global ulong *key_idx,
 		    const __global uint *loaded_hashes,
 			  __global uint *outKeyIdx,
 		    const __global struct bitmap_context_mixed *bitmap1,
@@ -284,18 +305,14 @@ __kernel void nt_om(const __global uint *keys,
 {
 	uint gid = get_global_id(0);
 	uint nt_buffer[12] = { 0 };
-	uint md4_size = 0, i;
+	ulong base = key_idx[gid];
+	uint md4_size = base & 63, i;
 	uint num_keys = get_global_size(0);
 	uint lid = get_local_id(0);
 	uint num_loaded_hashes = loaded_hashes[0];
+	uint nt_index = 0;
 
-	uint hash[4];
-
-	if(gid < num_loaded_hashes)
-		for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++)
-			outKeyIdx[(i*num_keys + gid)] = 0;
-
-	barrier(CLK_GLOBAL_MEM_FENCE);
+	uint hash[4], key;
 
 	__local uint sbitmap0[BITMAP_SIZE_1 >> 5];
 	__local uint sbitmap1[BITMAP_SIZE_1 >> 5];
@@ -315,8 +332,17 @@ __kernel void nt_om(const __global uint *keys,
 		sbitmap3[i*LWS + lid] = bitmap1[0].bitmap3[i*LWS + lid];
 
 	barrier(CLK_LOCAL_MEM_FENCE);
-
-	coalasced_load(nt_buffer, keys, &md4_size, gid, num_keys);
+	
+	keys += base >> 6;
+		
+	for (i = 0; i < (md4_size+3)/4; i++){
+		key = *keys++;
+		nt_buffer[nt_index++] = (key & 0xffU) | (((key >> 8) & 0xffU) << 16);
+		nt_buffer[nt_index++] = ((key >> 16) & 0xffU) | (((key >> 24) & 0xffU) << 16) ;
+	}
+	nt_buffer[md4_size >> 1] = (0x80 << ((md4_size & 1) << 4)) | nt_buffer[md4_size >> 1];
+	md4_size = md4_size << 4;
+	
 	nt_crypt(hash, nt_buffer, md4_size);
 	cmp(loaded_hashes,
 	    sbitmap0, sbitmap1, sbitmap2, sbitmap3, &bitmap1[0].gbitmap0[0],
@@ -326,7 +352,8 @@ __kernel void nt_om(const __global uint *keys,
 
 }
 
-__kernel void nt_mm(const __global uint *keys ,
+__kernel void nt_mm(const __global uint *keys,
+		    const __global ulong *key_idx,
 		    const __global uint *loaded_hashes,
 		          __global uint *outKeyIdx,
 		    const __global struct bitmap_context_mixed *bitmap1,
@@ -384,12 +411,11 @@ __kernel void nt_mm(const __global uint *keys ,
 		for(i = 0; i < 3; i++)
 			activeRangePos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
+		if(gid==1)
+			for (i = 0; i < num_loaded_hashes; i++)
+				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+			barrier(CLK_GLOBAL_MEM_FENCE);
 	}
-
-	if(gid==1)
-		for (i = 0; i < num_loaded_hashes; i++)
-			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
-	barrier(CLK_GLOBAL_MEM_FENCE);
 
 	coalasced_load(nt_buffer, keys, &md4_size, gid, num_keys);
 
