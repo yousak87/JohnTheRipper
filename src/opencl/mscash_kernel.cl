@@ -322,7 +322,7 @@ __kernel void mscash_mm(__global uint *keys,
 	ulong base = keyIdx[gid];
 	uint passwordlength = base & 63;
 	uint num_loaded_hashes = loaded_hashes[0];
-	uchar activeRangePos[3], rangeNumChars[3];
+	uchar activeRangePos[3], rangeNumChars[3], activeCharPos[3];
 	uint i, j, k, ii, ctr;
 
 	keys += base >> 6;
@@ -338,8 +338,10 @@ __kernel void mscash_mm(__global uint *keys,
 		activeRangePos[i] = msk_ctx[0].activeRangePos[i];
 	}
 
-	for(i = 0; i < 3; i++)
+	for(i = 0; i < 3; i++) {
 		rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
+		activeCharPos[i] = msk_ctx[0].ranges[activeRangePos[i]].pos;
+	}
 
 	// Parallel load , works only if LWS is 64
 	ranges[lid] = msk_ctx[0].ranges[activeRangePos[0]].chars[lid];
@@ -368,7 +370,7 @@ __kernel void mscash_mm(__global uint *keys,
 		ii = outKeyIdx[gid>>2];
 		ii = (ii >> ((gid&3) << 3))&0xFF;
 		for(i = 0; i < 3; i++)
-			activeRangePos[i] += ii;
+			activeCharPos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
 		
 		if(gid==1)
@@ -383,15 +385,15 @@ __kernel void mscash_mm(__global uint *keys,
 		restore[ii] = nt_buffer[ii];
 
 	ctr = i = j = k = 0;
-	if (rangeNumChars[2]) PUTCHAR(restore, activeRangePos[2], ranges[2 * MAX_GPU_CHARS]);
-	if (rangeNumChars[1]) PUTCHAR(restore, activeRangePos[1], ranges[MAX_GPU_CHARS]);
+	if (rangeNumChars[2]) PUTCHAR(restore, activeCharPos[2], ranges[2 * MAX_GPU_CHARS]);
+	if (rangeNumChars[1]) PUTCHAR(restore, activeCharPos[1], ranges[MAX_GPU_CHARS]);
 
 	do {
 		do {
 			for (i = 0; i < rangeNumChars[0]; i++) {
 				for(ii = 0; ii < 16; ii++)
 					nt_buffer[ii] = restore[ii];
-				PUTCHAR(nt_buffer, activeRangePos[0], ranges[i]);
+				PUTCHAR(nt_buffer, activeCharPos[0], ranges[i]);
 				md4_crypt(output, nt_buffer);
 				nt_buffer[0] = output[0];
 				nt_buffer[1] = output[1];
@@ -406,14 +408,14 @@ __kernel void mscash_mm(__global uint *keys,
 			}
 
 			j++;
-			PUTCHAR(restore, activeRangePos[1], ranges[j + MAX_GPU_CHARS]);
+			PUTCHAR(restore, activeCharPos[1], ranges[j + MAX_GPU_CHARS]);
 
 		} while ( j < rangeNumChars[1]);
 
 		k++;
-		PUTCHAR(restore, activeRangePos[2], ranges[k + 2 * MAX_GPU_CHARS]);
+		PUTCHAR(restore, activeCharPos[2], ranges[k + 2 * MAX_GPU_CHARS]);
 
-		PUTCHAR(restore, activeRangePos[1], ranges[MAX_GPU_CHARS]);
+		PUTCHAR(restore, activeCharPos[1], ranges[MAX_GPU_CHARS]);
 		j = 0;
 
 	} while( k < rangeNumChars[2]);
