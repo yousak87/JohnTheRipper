@@ -237,6 +237,16 @@ __kernel void mscash_self_test(__global uint *keys, __global ulong *keyIdx, __gl
 	outBuffer[gid + 3 * numkeys] = output[3];
 }
 
+__kernel void zero(__global uint *outKeyIdx, uint num_loaded_hashes) {
+	uint i;
+	uint gid = get_global_id(0);
+	uint num_keys = get_global_size(0);
+	for (i = 0; i < (num_loaded_hashes/num_keys) + 1; i++) {
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes] = 0;
+			outKeyIdx[(i*num_keys + gid) % num_loaded_hashes + num_loaded_hashes] = 0;
+	}
+
+}
 __kernel void mscash_om(__global uint *keys,
 		     __global ulong *keyIdx,
 		     __global uint *outKeyIdx,
@@ -278,11 +288,6 @@ __kernel void mscash_om(__global uint *keys,
 		for(i = 0; i < 12; i++)
 			login[i] = salt[i];
 	barrier(CLK_LOCAL_MEM_FENCE);
-
-	if(gid==1)
-		for (i = 0; i < num_loaded_hashes; i++)
-			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
-	barrier(CLK_GLOBAL_MEM_FENCE);
 
 	prepare_key(keys, passwordlength, nt_buffer);
 	md4_crypt(output, nt_buffer);
@@ -365,12 +370,12 @@ __kernel void mscash_mm(__global uint *keys,
 		for(i = 0; i < 3; i++)
 			activeRangePos[i] += ii;
 		barrier(CLK_GLOBAL_MEM_FENCE);
+		
+		if(gid==1)
+			for (i = 0; i < num_loaded_hashes; i++)
+				outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
+		barrier(CLK_GLOBAL_MEM_FENCE);
 	}
-
-	if(gid==1)
-		for (i = 0; i < num_loaded_hashes; i++)
-			outKeyIdx[i] = outKeyIdx[i + num_loaded_hashes] = 0;
-	barrier(CLK_GLOBAL_MEM_FENCE);
 
 	prepare_key(keys, passwordlength, nt_buffer);
 

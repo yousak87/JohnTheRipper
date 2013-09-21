@@ -48,7 +48,7 @@ static unsigned int mask_mode = 0;
 static unsigned int num_keys = 0;
 static unsigned int multiplier = 1;
 
-cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om;
+cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om, zero;
 static struct db_main *DB;
 
 static struct mask_context msk_ctx;
@@ -93,6 +93,7 @@ static void done()
 	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel mask mode");
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel other modes");
+	HANDLE_CLERROR(clReleaseKernel(zero), "Release zero");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
 	HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release mask");
 
@@ -135,6 +136,9 @@ static void init(struct fmt_main *self)
 
 	crk_kernel_om = clCreateKernel( program[ocl_gpu_id], "mscash_om", &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
+	
+	zero = clCreateKernel(program[ocl_gpu_id], "zero", &ret_code);
+	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
 	pinned_saved_keys = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, BUFSIZE * MAX_KEYS_PER_CRYPT, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating page-locked memory pinned_saved_keys");
@@ -367,6 +371,8 @@ static void reset(struct db_main *db) {
 		"Error setting argument 2");
 		HANDLE_CLERROR(clSetKernelArg(crk_kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu ),
 		"Error setting argument 3");
+		HANDLE_CLERROR(clSetKernelArg(zero, 0, sizeof(buffer_outKeyIdx), &buffer_outKeyIdx), 
+		"Error setting argument 0");
 
 		self_test = 0;
 
@@ -711,6 +717,11 @@ static int crypt_all(int *pcount, struct db_salt *currentsalt) {
 			HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0,
 				(DB->format->params.max_keys_per_crypt), mask_offset_buffer, 0, NULL, NULL),
 				"failed in clEnqueWriteBuffer buffer_outKeyIdx");
+	else {
+		HANDLE_CLERROR(clSetKernelArg(zero, 1, sizeof(cl_uint), &loaded_count[sequential_id]), "Error setting argument 1");
+		HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], zero, 1, NULL, &gws, &lws, 0, NULL, NULL), "failed in clEnqueueNDRangeKernel zero");
+		clFinish(queue[ocl_gpu_id]);
+	}		
 
 	// Execute method
 	clEnqueueNDRangeKernel( queue[ocl_gpu_id], crk_kernel, 1, NULL, &gws, &lws, 0, NULL, NULL);
