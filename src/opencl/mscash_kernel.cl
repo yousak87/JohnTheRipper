@@ -141,7 +141,7 @@ inline void md4_crypt(__private uint *output, __private uint *nt_buffer)
 
 inline void prepare_key(__global uint * key, int length, uint * nt_buffer)
 {
-	int i = 0, nt_index, keychars;
+	uint i = 0, nt_index, keychars;
 	nt_index = 0;
 	for (i = 0; i < (length + 3)/ 4; i++) {
 		keychars = key[i];
