@@ -48,7 +48,7 @@ static unsigned int mask_mode = 0;
 static unsigned int num_keys = 0;
 static unsigned int multiplier = 1;
 
-cl_kernel crk_kernel, crk_kernel_mm, crk_kernel_om, zero;
+cl_kernel crk_kernel, crk_kernel_nnn, crk_kernel_cnn, crk_kernel_ccc, crk_kernel_om, zero;
 static struct db_main *DB;
 
 static struct mask_context msk_ctx;
@@ -91,7 +91,9 @@ static void done()
 	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_salt), "Release pinned saved salt");
 	HANDLE_CLERROR(clReleaseMemObject(buffer_out), "Release mem out");
 	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel_mm), "Release kernel mask mode");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_nnn), "Release kernel nnn");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_cnn), "Release kernel cnn");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_ccc), "Release kernel ccc");
 	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel other modes");
 	HANDLE_CLERROR(clReleaseKernel(zero), "Release zero");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
@@ -131,7 +133,13 @@ static void init(struct fmt_main *self)
 	crypt_kernel = clCreateKernel( program[ocl_gpu_id], "mscash_self_test", &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
 
-	crk_kernel_mm = clCreateKernel( program[ocl_gpu_id], "mscash_mm", &ret_code );
+	crk_kernel_nnn = clCreateKernel(program[ocl_gpu_id], "mscash_nnn", &ret_code);
+	HANDLE_CLERROR(ret_code,"Error creating kernel");
+	
+	crk_kernel_cnn = clCreateKernel(program[ocl_gpu_id], "mscash_cnn", &ret_code);
+	HANDLE_CLERROR(ret_code,"Error creating kernel");
+	
+	crk_kernel_ccc = clCreateKernel(program[ocl_gpu_id], "mscash_ccc", &ret_code);
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
 
 	crk_kernel_om = clCreateKernel( program[ocl_gpu_id], "mscash_om", &ret_code );
@@ -311,6 +319,60 @@ static void set_salt(void *salt)
 
 static void no_op(void *salt){}
 
+/* crk_kernel_ccc: optimized for kernel with all 3 ranges consecutive.
+ * crk_kernel_nnn: optimized for kernel with no consecutive ranges.
+ * crk_kernel_cnn: optimized for kernel with 1st range being consecutive and remaining ranges non-consecutive.
+ *
+ * select_kernel() assumes that the active ranges are arranged according to decreasing character count, which is taken
+ * care of inside check_mask_rawmd5().
+ *
+ * crk_kernel_ccc used for mask types: ccc, cc, c.
+ * crk_kernel_nnn used for mask types: nnn, nnc, ncn, ncc, nc, nn, n.
+ * crk_kernel_cnn used for mask types: cnn, cnc, ccn, cn.
+ */
+
+static void select_kernel(struct mask_context *msk_ctx) {
+
+	if (!(msk_ctx->ranges[msk_ctx->activeRangePos[0]].start)) {
+		crk_kernel = crk_kernel_nnn;
+		fprintf(stderr,"Using kernel mscash_nnn...\n" );
+		return;
+	}
+
+	else {
+		crk_kernel = crk_kernel_ccc;
+
+		if ((msk_ctx->count) > 1) {
+			if (!(msk_ctx->ranges[msk_ctx->activeRangePos[1]].start)) {
+				crk_kernel = crk_kernel_cnn;
+				fprintf(stderr,"Using kernel mscash_cnn...\n" );
+				return;
+			}
+
+			else {
+				crk_kernel = crk_kernel_ccc;
+
+				/* For type ccn */
+				if ((msk_ctx->count) == 3)
+					if (!(msk_ctx->ranges[msk_ctx->activeRangePos[2]].start))  {
+						crk_kernel = crk_kernel_cnn;
+						if ((msk_ctx->ranges[msk_ctx->activeRangePos[2]].count) > 64) {
+							fprintf(stderr,"mscash-opencl failed processing mask type ccn.\n" );
+						}
+						fprintf(stderr,"Using kernel mscash_cnn...\n" );
+						return;
+					}
+
+				fprintf(stderr,"Using kernel mscash_ccc...\n" );
+				return;
+			}
+		}
+
+		fprintf(stderr,"Using kernel mscash_ccc...\n" );
+		return;
+	}
+}
+
 static void reset(struct db_main *db) {
 
 	if(db != NULL) {
@@ -356,7 +418,7 @@ static void reset(struct db_main *db) {
 		HANDLE_CLERROR(ret_code, "Error creating buffer cmp_out\n");
 
 		if (mask_mode) {
-			crk_kernel = crk_kernel_mm;
+			select_kernel(&msk_ctx);
 			DB = db;
 		}
 		else
