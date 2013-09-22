@@ -32,6 +32,9 @@ static unsigned int *saved_plain, *outbuffer, *outKeyIdx, *current_salt;
 static uint64_t *saved_idx;
 cl_mem 	pinned_saved_keys, pinned_saved_idx, pinned_saved_salt,
 	buffer_keys, buffer_idx, buffer_salt, buffer_out,
+	/* buffer_outKeyIdx is used to for storing indices of cracked
+	 * hashes. Also used to input mask-offset for appending the mask
+	 * in case of mask + wordlist mode. */
 	buffer_outKeyIdx;
 
 /* The following variables depends on the number of salts loaded_count
@@ -83,21 +86,21 @@ static void done()
 
 	MEM_FREE(outbuffer);
 
-	HANDLE_CLERROR(clReleaseMemObject(buffer_keys), "Release mem in");
-	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_keys), "Release pinned mem in");
-	HANDLE_CLERROR(clReleaseMemObject(buffer_idx), "Release key indices");
+	HANDLE_CLERROR(clReleaseMemObject(buffer_keys), "Release buffered keys");
+	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_keys), "Release pinned saved keys");
+	HANDLE_CLERROR(clReleaseMemObject(buffer_idx), "Release buffered indices");
 	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_idx), "Release pinned saved key indeces");
-	HANDLE_CLERROR(clReleaseMemObject(buffer_salt), "Release mem salt");
+	HANDLE_CLERROR(clReleaseMemObject(buffer_salt), "Release buffered salt");
 	HANDLE_CLERROR(clReleaseMemObject(pinned_saved_salt), "Release pinned saved salt");
-	HANDLE_CLERROR(clReleaseMemObject(buffer_out), "Release mem out");
-	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release kernel");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel_nnn), "Release kernel nnn");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel_cnn), "Release kernel cnn");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel_ccc), "Release kernel ccc");
-	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release kernel other modes");
-	HANDLE_CLERROR(clReleaseKernel(zero), "Release zero");
+	HANDLE_CLERROR(clReleaseMemObject(buffer_out), "Release buffered output hashes.");
+	HANDLE_CLERROR(clReleaseKernel(crypt_kernel), "Release self test kernel");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_nnn), "Release mask-mode kernel nnn");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_cnn), "Release mask-mode kernel cnn");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_ccc), "Release mask-mode kernel ccc");
+	HANDLE_CLERROR(clReleaseKernel(crk_kernel_om), "Release mask-mode kernel other modes");
+	HANDLE_CLERROR(clReleaseKernel(zero), "Release kernel zero");
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Release Program");
-	HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release mask");
+	HANDLE_CLERROR(clReleaseMemObject(buffer_mask_gpu), "Release buffered mask");
 
 	if(!self_test) {
 		int i;
@@ -130,9 +133,11 @@ static void init(struct fmt_main *self)
 
 	opencl_init("$JOHN/kernels/mscash_kernel.cl", ocl_gpu_id, NULL);
 
+	/* Kernel for self-test */
 	crypt_kernel = clCreateKernel( program[ocl_gpu_id], "mscash_self_test", &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
 
+	/* Following three kernels are for mask-mode */
 	crk_kernel_nnn = clCreateKernel(program[ocl_gpu_id], "mscash_nnn", &ret_code);
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
 	
@@ -142,9 +147,11 @@ static void init(struct fmt_main *self)
 	crk_kernel_ccc = clCreateKernel(program[ocl_gpu_id], "mscash_ccc", &ret_code);
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
 
+	/* kernel for all modes othe than mask-mode. */
 	crk_kernel_om = clCreateKernel( program[ocl_gpu_id], "mscash_om", &ret_code );
 	HANDLE_CLERROR(ret_code,"Error creating kernel");
 	
+	/* Used to clear buffer_outKeyIdx. */
 	zero = clCreateKernel(program[ocl_gpu_id], "zero", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
@@ -312,11 +319,13 @@ static void *salt(char *ciphertext)
 	return &final_salt;
 }
 
+/* Used during self-test. */
 static void set_salt(void *salt)
 {
 	memcpy(current_salt, salt, sizeof(unsigned int) * 12);
 }
 
+/* Used during cracking. */
 static void no_op(void *salt){}
 
 /* crk_kernel_ccc: optimized for kernel with all 3 ranges consecutive.
@@ -393,7 +402,8 @@ static void reset(struct db_main *db) {
 		buffer_bitmaps2 = (cl_mem *)mem_alloc(max_salts * sizeof(cl_mem));
 		buffer_salts = (cl_mem *)mem_alloc(max_salts * sizeof(cl_mem));
 		mask_offsets = (unsigned char*) mem_calloc(db->format->params.max_keys_per_crypt);
-
+		
+		/* Allocate buffers and memory for all salts and their hashes. */ 
 		do {
 			salt -> sequential_id = ctr++;
 			pwcount = salt->count;
@@ -482,6 +492,7 @@ static void load_bitmap(unsigned int num_loaded_hashes, unsigned int *loaded_has
 	}
 }
 
+/* generate hashtable */
 static void load_hashtable_plus(unsigned int *hashtable, unsigned int *loaded_next_hash, unsigned int idx, unsigned int num_loaded_hashes, unsigned int szHashTbl) {
 	unsigned int i;
 #if MSCASH_DEBUG
@@ -508,14 +519,15 @@ static void check_mask_dcc(struct mask_context *msk_ctx) {
 
 	if(msk_ctx -> count > PLAINTEXT_LENGTH) msk_ctx -> count = PLAINTEXT_LENGTH;
 	if(msk_ctx -> count > MASK_RANGES_MAX) {
-		fprintf(stderr, "MASK parameters are too small...Exiting...\n");
+		fprintf(stderr, "MASK parameters are too big...Exiting...\n");
 		exit(EXIT_FAILURE);
-
 	}
 
-  /* Assumes msk_ctx -> activeRangePos[] is sorted. Check if any range exceeds nt key limit */
+  /* Assumes msk_ctx -> activeRangePos[] is sorted.
+   * activeRangePos[] is alredy sorted by mask.c . 
+   * Check if any position of any range exceeds mscash key limit. */
 	for( i = 0; i < msk_ctx->count; i++)
-		if(msk_ctx -> activeRangePos[i] >= PLAINTEXT_LENGTH) {
+		if(msk_ctx->ranges[msk_ctx->activeRangePos[i]].pos >= PLAINTEXT_LENGTH) {
 			msk_ctx->count = i;
 			break;
 		}
@@ -616,8 +628,6 @@ static void set_key(char *_key, int index)
 	const ARCH_WORD_32 *key = (ARCH_WORD_32*)_key;
 	int len = strlen(_key);
 
-	//fprintf(stderr, "%s\n",_key);
-
 	saved_idx[index] = (key_idx << 6) | len;
 
 	while (len > 4) {
@@ -656,7 +666,8 @@ static void passgen(int ctr, int offset, char *key) {
 		key[msk_ctx.ranges[msk_ctx.activeRangePos[1]].pos + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[1]].chars[j];
 	}
 	if (msk_ctx.ranges[msk_ctx.activeRangePos[2]].count) {
-		k = (ctr / (msk_ctx.ranges[msk_ctx.activeRangePos[0]].count * msk_ctx.ranges[msk_ctx.activeRangePos[1]].count)) % msk_ctx.ranges[msk_ctx.activeRangePos[2]].count;
+		k = (ctr / (msk_ctx.ranges[msk_ctx.activeRangePos[0]].count * msk_ctx.ranges[msk_ctx.activeRangePos[1]].count)) 
+		    % msk_ctx.ranges[msk_ctx.activeRangePos[2]].count;
 		key[msk_ctx.ranges[msk_ctx.activeRangePos[2]].pos + offset] = msk_ctx.ranges[msk_ctx.activeRangePos[2]].chars[k];
 	}
 }
