@@ -446,7 +446,7 @@ static void check_mask_rawmd5(struct mask_context *msk_ctx) {
 
   /* Assumes msk_ctx -> activeRangePos[] is sorted. Check if any range exceeds md5 key limit */
 	for( i = 0; i < msk_ctx->count; i++)
-		if(msk_ctx -> activeRangePos[i] >= PLAINTEXT_LENGTH) {
+		if(msk_ctx->ranges[msk_ctx->activeRangePos[i]].pos >= PLAINTEXT_LENGTH) {
 			msk_ctx->count = i;
 			break;
 		}

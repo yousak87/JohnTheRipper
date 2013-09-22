@@ -475,21 +475,21 @@ static int cmp_exact(char *source, int index) {
 		unsigned int *t = (unsigned int *) get_binary(source);
 		unsigned int num = benchmark ? global_work_size: loaded_count;
 		if(benchmark) {
-		if (!have_full_hashes){
-			clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
-				sizeof(cl_uint) * num,
-				sizeof(cl_uint) * 3 * num, res_hashes, 0,
-				NULL, NULL);
-			have_full_hashes = 1;
-		}
+			if (!have_full_hashes){
+				clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_out, CL_TRUE,
+					sizeof(cl_uint) * num,
+					sizeof(cl_uint) * 3 * num, res_hashes, 0,
+					NULL, NULL);
+				have_full_hashes = 1;
+			}
 
-		if (t[0]!=res_hashes[index])
-			return 0;
-		if (t[2]!=res_hashes[1 * num + index])
-			return 0;
-		if (t[3]!=res_hashes[2 * num + index])
-			return 0;
-		return 1;
+			if (t[0]!=res_hashes[index])
+				return 0;
+			if (t[2]!=res_hashes[1 * num + index])
+				return 0;
+			if (t[3]!=res_hashes[2 * num + index])
+				return 0;
+			return 1;
 		}
 		else {
 			if(!outKeyIdx[index]) return 0;
@@ -640,7 +640,7 @@ static void check_mask_nt(struct mask_context *msk_ctx) {
 
   /* Assumes msk_ctx -> activeRangePos[] is sorted. Check if any range exceeds nt key limit */
 	for( i = 0; i < msk_ctx->count; i++)
-		if(msk_ctx -> activeRangePos[i] >= PLAINTEXT_LENGTH) {
+		if(msk_ctx->ranges[msk_ctx->activeRangePos[i]].pos >= PLAINTEXT_LENGTH) {
 			msk_ctx->count = i;
 			break;
 		}
