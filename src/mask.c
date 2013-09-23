@@ -38,7 +38,7 @@ unsigned char *mask_offset_buffer;
 static struct rpp_context rpp_ctx;
 
 /* TODO: the fork/node/MPI splitting is very inefficient */
-static unsigned int seq;
+static unsigned int seq, multiplier = 1;
 
 static int get_progress(int *hundth_perc)
 {
@@ -55,6 +55,7 @@ static int get_progress(int *hundth_perc)
 	}
 
 	try = ((unsigned long long)status.cands.hi << 32) + status.cands.lo;
+	try *= multiplier;
 
 	if (!try) {
 		hundredXpercent = percent = 0;
@@ -239,6 +240,7 @@ void mask_process(struct fmt_main *fmt, char *mask, unsigned char flg_wrd) {
 		for (i = 0; i < msk_ctx.count; i++)
 			fmt->params.num_internal_keys *= msk_ctx.ranges[msk_ctx.activeRangePos[i]].count;
 	}
+	multiplier = fmt->params.num_internal_keys;
 }
 
 void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
