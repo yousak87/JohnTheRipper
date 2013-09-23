@@ -1,6 +1,7 @@
 /*
  * This file is part of John the Ripper password cracker,
  * Copyright (c) 2013 by Solar Designer
+ * Copyright (c) 2013 by magnum
  * Copyright (c) 2013 Sayantan Datta <std2048 at gmail dot com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -13,6 +14,8 @@
 
 #include "misc.h"		/* for error() */
 #include "logger.h"
+#include "os.h"
+#include "signals.h"
 #include "status.h"
 #include "options.h"
 #include "rpp.h"
@@ -33,6 +36,44 @@ static struct mask_context msk_ctx;
 unsigned char *mask_offset_buffer;
 
 static struct rpp_context rpp_ctx;
+
+/* TODO: the fork/node/MPI splitting is very inefficient */
+static unsigned int seq;
+
+static int get_progress(int *hundth_perc)
+{
+	int hundredXpercent, percent;
+	unsigned long long try, cand;
+	int i;
+
+	i = 0; cand = 1;
+	while (rpp_ctx.ranges[i].count)
+		cand *= rpp_ctx.ranges[i++].count;
+
+	if (options.node_count) {
+		cand /= options.node_count;
+	}
+
+	try = ((unsigned long long)status.cands.hi << 32) + status.cands.lo;
+
+	if (!try) {
+		hundredXpercent = percent = 0;
+		return percent;
+	}
+
+	if (!cand)
+		return -1;
+
+	if (try > 1844674407370955LL) {
+		*hundth_perc = percent = 99;
+	} else {
+		hundredXpercent = (int)((unsigned long long)(10000 * (try)) / (unsigned long long)cand);
+		percent = hundredXpercent / 100;
+		*hundth_perc = hundredXpercent - (percent*100);
+	}
+
+	return percent;
+}
 
 /* 
  * Calculates nCr combinations recursively.
@@ -208,16 +249,9 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
 	unsigned int index, length;
 	size_t mask_offset;
 
-	if (options.node_count) {
-		if (john_main_process)
-			fprintf(stderr,
-			    "--mask is not yet compatible with --node and --fork\n");
-		error();
-	}
-
 	log_event("Proceeding with mask mode");
 
-	status_init(NULL, 0);
+	status_init(&get_progress, 0);
 #if 0
 	rec_restore_mode(restore_state);
 	rec_init(db, save_state);
@@ -277,6 +311,12 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
 #endif
 		flag = 0;
 		while ((mask_word = msk_next(&rpp_ctx, &msk_ctx, &flag))) {
+			if (options.node_count) {
+				int for_node = seq++ % options.node_count + 1;
+					if (for_node < options.node_min ||
+				    for_node > options.node_max)
+					continue;
+			}
 			if (ext_filter(mask_word))
 				if (crk_process_key(mask_word))
 					break;
