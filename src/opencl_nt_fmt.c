@@ -262,16 +262,16 @@ static void init(struct fmt_main *self){
 
 	crk_kernel_nnn = clCreateKernel( program[ocl_gpu_id], "nt_nnn", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel nnn");
-	
+
 	crk_kernel_cnn = clCreateKernel( program[ocl_gpu_id], "nt_cnn", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel cnn");
-	
+
 	crk_kernel_ccc = clCreateKernel( program[ocl_gpu_id], "nt_ccc", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel ccc");
 
 	crk_kernel_om = clCreateKernel( program[ocl_gpu_id], "nt_om", &ret_code );
 	HANDLE_CLERROR(ret_code, "Error creating kernel");
-	
+
 	zero = clCreateKernel(program[ocl_gpu_id], "zero", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
@@ -296,7 +296,7 @@ static void init(struct fmt_main *self){
 	HANDLE_CLERROR(ret_code,"Error creating buffer argument");
 	buffer_mask_gpu = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY, sizeof(struct mask_context) , NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating buffer mask gpu\n");
-	
+
 	pinned_saved_keys = clCreateBuffer(context[ocl_gpu_id], CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, BUFSIZE * global_work_size, NULL, &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating page-locked memory pinned_saved_keys");
 	saved_plain = clEnqueueMapBuffer(queue[ocl_gpu_id], pinned_saved_keys, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, BUFSIZE * global_work_size, 0, NULL, NULL, &ret_code);
@@ -524,7 +524,7 @@ static void setKernelArgs(cl_kernel *kernel) {
 	if(mask_mode)
 		HANDLE_CLERROR(clSetKernelArg(*kernel, argIndex++, sizeof(buffer_mask_gpu), (void*) &buffer_mask_gpu),
 			"Error setting argument 6");
-	HANDLE_CLERROR(clSetKernelArg(zero, 0, sizeof(buffer_outKeyIdx), &buffer_outKeyIdx), "Error setting argument 0");	
+	HANDLE_CLERROR(clSetKernelArg(zero, 0, sizeof(buffer_outKeyIdx), &buffer_outKeyIdx), "Error setting argument 0");
 }
 
 static void opencl_nt_reset(struct db_main *db) {
@@ -705,7 +705,7 @@ static void load_mask(struct fmt_main *fmt) {
 	}
 	memcpy(&msk_ctx, fmt->private.msk_ctx, sizeof(struct mask_context));
 	check_mask_nt(&msk_ctx);
-	
+
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_mask_gpu, CL_TRUE, 0, sizeof(struct mask_context), &msk_ctx, 0, NULL, NULL ), "Failed Copy data to gpu");
 }
 
@@ -794,7 +794,7 @@ static char *get_key(int index)
 static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 {
 	int count = *pcount;
-	
+
 	// copy keys to the device
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_keys, CL_TRUE, 0, 4 * key_idx, saved_plain, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_keys");
 	HANDLE_CLERROR(clEnqueueWriteBuffer(queue[ocl_gpu_id], buffer_idx, CL_TRUE, 0, sizeof(uint64_t) * global_work_size, saved_idx, 0, NULL, NULL), "failed in clEnqueueWriteBuffer buffer_idx");
@@ -815,7 +815,7 @@ static int crypt_all_self_test(int *pcount, struct db_salt *salt)
 static int crypt_all(int *pcount, struct db_salt *salt)
 {
 	unsigned int i;
-	
+
 	if(mask_mode)
 		*pcount *= multiplier;
 
@@ -840,10 +840,10 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 			(DB->format->params.max_keys_per_crypt), mask_offset_buffer, 0, NULL, NULL),
 			"failed in clEnqueWriteBuffer buffer_outKeyIdx");
 	else {
-		HANDLE_CLERROR(clSetKernelArg(zero, 1, sizeof(uint), &loaded_count), "Error setting argument 1");
+		HANDLE_CLERROR(clSetKernelArg(zero, 1, sizeof(cl_uint), &loaded_count), "Error setting argument 1");
 		HANDLE_CLERROR(clEnqueueNDRangeKernel(queue[ocl_gpu_id], zero, 1, NULL, &global_work_size, &local_work_size, 0, NULL, NULL), "failed in clEnqueueNDRangeKernel zero");
 		clFinish(queue[ocl_gpu_id]);
-	}	
+	}
 
 	// Execute method
 	clEnqueueNDRangeKernel( queue[ocl_gpu_id], crk_kernel, 1, NULL, &global_work_size, &local_work_size, 0, NULL, profilingEvent);
