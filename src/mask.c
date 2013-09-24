@@ -14,6 +14,7 @@
 
 #include "misc.h"		/* for error() */
 #include "logger.h"
+#include "recovery.h"
 #include "os.h"
 #include "signals.h"
 #include "status.h"
@@ -35,10 +36,10 @@ static struct mask_context msk_ctx;
  */ 
 unsigned char *mask_offset_buffer;
 
-static struct rpp_context rpp_ctx;
+static struct rpp_context rpp_ctx, rec_ctx;
 
 /* TODO: the fork/node/MPI splitting is very inefficient */
-static unsigned int seq, multiplier = 1;
+static unsigned int seq, rec_seq, multiplier = 1;
 
 static int get_progress(int *hundth_perc)
 {
@@ -74,6 +75,39 @@ static int get_progress(int *hundth_perc)
 	}
 
 	return percent;
+}
+
+static void save_state(FILE *file)
+{
+	int i;
+
+	fprintf(file, "%u\n", rec_seq);
+	fprintf(file, "%s\n", rec_ctx.output);
+	fprintf(file, "%d\n", rec_ctx.count);
+	for (i = 0; i < rec_ctx.count; i++)
+		fprintf(file, "%d\n", rec_ctx.ranges[i].index);
+}
+
+static int restore_state(FILE *file)
+{
+	int i;
+
+	if (fscanf(file, "%u\n", &seq) != 1)
+		return 1;
+	if (fscanf(file, "%s\n", rpp_ctx.output) != 1)
+		return 1;
+	if (fscanf(file, "%d\n", &rpp_ctx.count) != 1)
+		return 1;
+	for (i = 0; i < rpp_ctx.count; i++)
+		if (fscanf(file, "%d\n", &rpp_ctx.ranges[i].index) != 1)
+			return 1;
+	return 0;
+}
+
+static void fix_state(void)
+{
+	rec_seq = seq;
+	rec_ctx = rpp_ctx;
 }
 
 /* 
@@ -254,7 +288,11 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
 	log_event("Proceeding with mask mode");
 
 	status_init(&get_progress, 0);
-#if 0
+#if 1
+	/* --stdout does not use fmt_init() */
+	if (rpp_ctx.input == NULL)
+		rpp_init_mask(&rpp_ctx, mask);
+	rpp_process_rule(&rpp_ctx);
 	rec_restore_mode(restore_state);
 	rec_init(db, save_state);
 
@@ -328,7 +366,7 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
 	crk_done();
 	MEM_FREE(mask_offset_buffer);
 
-#if 0
+#if 1
 	rec_done(event_abort);
 #endif
 }
