@@ -38,8 +38,12 @@ unsigned char *mask_offset_buffer;
 
 static struct rpp_context rpp_ctx, rec_ctx;
 
-/* TODO: the fork/node/MPI splitting is inefficient */
-static int my_words, rec_my_words, their_words, rec_their_words, multiplier = 1;
+/*
+ * A "sequence number" for distributing the candidate passwords across nodes.
+ * It is OK if this number overflows once in a while, as long as this happens
+ * in the same way for all nodes (must be same size unsigned integer type).
+ */
+static unsigned int seq, rec_seq, multiplier = 1;
 
 static int get_progress(int *hundth_perc)
 {
@@ -81,8 +85,7 @@ static void save_state(FILE *file)
 {
 	int i;
 
-	fprintf(file, "%u\n", rec_my_words);
-	fprintf(file, "%u\n", rec_their_words);
+	fprintf(file, "%u\n", rec_seq);
 	fprintf(file, "%s\n", rec_ctx.output);
 	fprintf(file, "%d\n", rec_ctx.count);
 	for (i = 0; i < rec_ctx.count; i++)
@@ -93,9 +96,7 @@ static int restore_state(FILE *file)
 {
 	int i;
 
-	if (fscanf(file, "%u\n", &my_words) != 1)
-		return 1;
-	if (fscanf(file, "%u\n", &their_words) != 1)
+	if (fscanf(file, "%u\n", &seq) != 1)
 		return 1;
 	if (fscanf(file, "%s\n", rpp_ctx.output) != 1)
 		return 1;
@@ -109,8 +110,7 @@ static int restore_state(FILE *file)
 
 static void fix_state(void)
 {
-	rec_my_words = my_words;
-	rec_their_words = their_words;
+	rec_seq = seq;
 	rec_ctx = rpp_ctx;
 }
 
@@ -288,22 +288,39 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
 	int flag;
 	unsigned int index, length;
 	size_t mask_offset;
-
-	my_words = options.node_max - options.node_min + 1;
-	their_words = options.node_min - 1;
+	int my_words, their_words;
 
 	log_event("Proceeding with mask mode");
-
-	status_init(&get_progress, 0);
 
 	/* --stdout does not use fmt_init() */
 	if (rpp_ctx.input == NULL)
 		rpp_init_mask(&rpp_ctx, mask);
+
+	seq = 0;
+
+	status_init(&get_progress, 0);
+
 	rpp_process_rule(&rpp_ctx);
 	rec_restore_mode(restore_state);
 	rec_init(db, save_state);
 
 	crk_init(db, fix_state, NULL);
+
+	my_words = options.node_max - options.node_min + 1;
+	their_words = options.node_min - 1;
+
+	if (seq) {
+/* Restored session.  seq is right after a word we've actually used. */
+		int for_node = seq % options.node_count + 1;
+		if (for_node < options.node_min ||
+		        for_node > options.node_max) {
+/* We assume that seq is at the beginning of other nodes' block */
+			their_words = options.node_count - my_words;
+		} else {
+			my_words = options.node_max - for_node + 1;
+			their_words = 0;
+		}
+	}
 
 	if (wordlist)
 		file = fopen((const char *)wordlist, "r");
@@ -330,6 +347,18 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
 			mask_offset = strlen(word) - 1;
 			while ((mask_word =
 				msk_next(&rpp_ctx, &msk_ctx, &flag))) {
+				if (options.node_count) {
+					seq++;
+					if (their_words) {
+						their_words--;
+						continue;
+					}
+					if (--my_words == 0) {
+						my_words =
+							options.node_max - options.node_min + 1;
+						their_words = options.node_count - my_words;
+					}
+				}
 				if (ext_filter(mask_word)) {
 					memcpy(word + mask_offset, mask_word,
 					    MASK_RANGES_MAX);
@@ -356,6 +385,7 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
 		flag = 0;
 		while ((mask_word = msk_next(&rpp_ctx, &msk_ctx, &flag))) {
 			if (options.node_count) {
+				seq++;
 				if (their_words) {
 					their_words--;
 					continue;
