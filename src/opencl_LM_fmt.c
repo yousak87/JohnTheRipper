@@ -144,32 +144,32 @@ static int binary_hash_0(void *binary)
 
 static int binary_hash_1(void *binary)
 {
-	return *(WORD *)binary & 0xFF;
+	return *(unsigned WORD *)binary & 0xFF;
 }
 
 static int binary_hash_2(void *binary)
 {
-	return *(WORD *)binary & 0xFFF;
+	return *(unsigned WORD *)binary & 0xFFF;
 }
 
 static int binary_hash_3(void *binary)
 {
-	return *(WORD *)binary & 0xFFFF;
+	return *(unsigned WORD *)binary & 0xFFFF;
 }
 
 static int binary_hash_4(void *binary)
 {
-	return *(WORD *)binary & 0xFFFFF;
+	return *(unsigned WORD *)binary & 0xFFFFF;
 }
 
 static int binary_hash_5(void *binary)
 {
-	return *(WORD *)binary & 0xFFFFFF;
+	return *(unsigned WORD *)binary & 0xFFFFFF;
 }
 
 static int binary_hash_6(void *binary)
 {
-	return *(WORD *)binary & 0x7FFFFFF;
+	return *(unsigned WORD *)binary & 0x7FFFFFF;
 }
 
 #define get_hash_0 opencl_LM_get_hash_0
@@ -183,11 +183,6 @@ static int binary_hash_6(void *binary)
 static int cmp_all(void *binary, int count) 
 {
 	return 1;
-}
-
-static int cmp_one(void *binary, int index)
-{
-	return opencl_LM_cmp_one_b((WORD *)binary, 64, index);
 }
 
 static int cmp_exact(char *source, int index)
