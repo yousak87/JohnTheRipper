@@ -379,7 +379,6 @@ static char *fmt_self_test_body(struct fmt_main *format,
 			sprintf(s_size, "cmp_one(%d)", index);
 			return s_size;
 		}
-#if 0
 /*
  * When bitmap is used, cmp_all() is never called, so cmp_one() or
  * cmp_exact() MUST check the full hash - they can not rely on cmp_all()
@@ -387,6 +386,7 @@ static char *fmt_self_test_body(struct fmt_main *format,
  *
  * This test currently gives false positives, excluded here.
  */
+#if 0 /* This test did its job but should be replaced with something better */
 		if (strcmp(format->params.label, "AFS"))
 		if (strcmp(format->params.label, "Raw-SHA1-Linkedin"))
 		if (strcmp(format->params.label, "Raw-SHA512-cuda"))
