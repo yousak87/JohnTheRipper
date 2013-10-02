@@ -372,7 +372,7 @@ void DES_bs_finalize_keys_active(int local_offset_K,
 
 	for(ic = 0; ic < activeRangeCount; ic++) {
 
-		kp = (__local DES_bs_vector *)&K[local_offset_K] + 7 * activeRangePos[ic];
+		kp = (__local DES_bs_vector *)&K[local_offset_K] + 8 * activeRangePos[ic];
 
 		weight = 1;
 		i = 0;
@@ -397,6 +397,7 @@ void DES_bs_finalize_keys_active(int local_offset_K,
 		FINALIZE_NEXT_KEY_BIT_4
 		FINALIZE_NEXT_KEY_BIT_5
 		FINALIZE_NEXT_KEY_BIT_6
+		FINALIZE_NEXT_KEY_BIT_7
 
 	}
 
@@ -415,9 +416,9 @@ void DES_bs_finalize_keys_passive(int local_offset_K,
 	kvtype v0, v1, v2, v3, v4, v5, v6, v7;
 
 
-	for(ic = activeRangeCount; ic < 8; ic++) {
+	for(ic = activeRangeCount; ic < 7; ic++) {
 
-		kp = (__local DES_bs_vector *)&K[local_offset_K] + 7 * activeRangePos[ic];
+		kp = (__local DES_bs_vector *)&K[local_offset_K] + 8 * activeRangePos[ic];
 
 		v0 = input_key[activeRangePos[ic]];
 		v0 =  (v0) | (unsigned int)(v0 << 8) | (unsigned int)(v0 << 16) | (unsigned int)(v0 << 24) ;
@@ -430,6 +431,7 @@ void DES_bs_finalize_keys_passive(int local_offset_K,
 		FINALIZE_NEXT_KEY_BIT_4
 		FINALIZE_NEXT_KEY_BIT_5
 		FINALIZE_NEXT_KEY_BIT_6
+		FINALIZE_NEXT_KEY_BIT_7
 
 	}
 

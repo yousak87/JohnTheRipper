@@ -2,7 +2,7 @@
  * This software is Copyright (c) 2012 Sayantan Datta <std2048 at gmail dot com>
  * and it is hereby released to the general public under the following terms:
  * Redistribution and use in source and binary forms, with or without modification, are permitted.
- * Based on Solar Designer implementation of DES_bs_b.c in jtr-v1.7.9
+ * Based on Solar Designer implementation of DES_bs_b.c in jtr-v1.7.9.
  */
 
 #include "opencl_LM_common_kenrel.h"
@@ -185,13 +185,13 @@ __kernel void DES_bs_25_self_test( constant uint *index768 __attribute__((max_co
 		__local ushort _local_index768[768] ;
 		__local unsigned char range[3*MAX_CHARS];
 #endif
-		for (i = 0; i < 8 ;i++)
+		for (i = 0; i < 7 ;i++)
 			activeRangePos[i] = msk_ctx[0].activeRangePos[i];
 
 		activeRangeCount = msk_ctx[0].count;
 
-		for (i = 0; i < 8; i++ )
-			input_key[i] = transfer_keys[8*section + i];
+		for (i = 0; i < 7; i++ )
+			input_key[i] = transfer_keys[7*section + i];
 
 		for (i = 0; i < activeRangeCount; i++) {
 			rangeNumChars[i] = msk_ctx[0].ranges[activeRangePos[i]].count;
@@ -234,6 +234,15 @@ __kernel void DES_bs_25_self_test( constant uint *index768 __attribute__((max_co
 		i = 1;
 
 		do {
+			vtype z = vzero, o = vones;
+			DES_bs_set_block_8(B, 0, z, z, z, z, z, z, z, z);
+			DES_bs_set_block_8(B, 8, o, o, o, z, o, z, z, z);
+			DES_bs_set_block_8(B, 16, z, z, z, z, z, z, z, o);
+			DES_bs_set_block_8(B, 24, z, z, o, z, z, o, o, o);
+			DES_bs_set_block_8(B, 32, z, z, z, o, z, o, o, o);
+			DES_bs_set_block_8(B, 40, z, z, z, z, z, o, z, z);
+			DES_bs_set_block_8(B, 48, o, o, z, z, z, z, o, z);
+			DES_bs_set_block_8(B, 56, o, z, o, z, o, o, o, o);
 			DES_bs_finalize_keys_active(local_offset_K, _local_K, offset, activeRangePos, activeRangeCount, range, rangeNumChars, input_key, start);
 
 			iterations = 25;
