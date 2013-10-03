@@ -221,10 +221,42 @@ static void combination_util(void *arr, int data[], int start, int end, int inde
 	}
 }
 
+static void lm_preprocess(struct rpp_context *ctx, unsigned int num_ranges) {
+	unsigned int i, j, k, count;
+	char buffer[0x100];
+	for (i = 0; i < num_ranges; i++) {
+		/* Lowecase to uppercase */
+		for (j = 0; j < ctx->ranges[i].count; j++)
+			if (ctx->ranges[i].chars[j] >= 'a' && ctx->ranges[i].chars[j] <= 'z')
+				ctx->ranges[i].chars[j] = ctx->ranges[i].chars[j] & ~0x20;
+		
+		count = 0;
+		memset(buffer, 0, 0x100);
+		
+		/* remove duplicates from each range. */
+		for (j = 0; j < ctx->ranges[i].count; j++) {
+			for (k = 0; k < count; k++) {
+				if(ctx->ranges[i].chars[j] == buffer[k])
+					break;
+			}
+			if (k == count) {
+				buffer[count] = ctx->ranges[i].chars[j];
+				count++;
+			}
+		}
+		
+		memcpy(ctx->ranges[i].chars, buffer, 0x100);
+		ctx->ranges[i].count = count;
+	}
+}
+
 static void set_mask(struct rpp_context *rpp_ctx, struct fmt_main *fmt,
                      unsigned char flg_wrd) {
 	int i;
-
+	
+	if (!strcmp((const char*)fmt->params.label, "lm-opencl") ||
+	    !strcmp((const char*)fmt->params.label, "lm"))
+		lm_preprocess(rpp_ctx, rpp_ctx->count);
 	/*
 	 * Copy mask parameters from rpp to mask for furthur
 	 * processing.
@@ -236,7 +268,7 @@ static void set_mask(struct rpp_context *rpp_ctx, struct fmt_main *fmt,
 		msk_ctx.ranges[i].pos =
 			rpp_ctx->ranges[i].pos - rpp_ctx->output;
 	}
-
+	
 	calc_combination(&msk_ctx, rpp_ctx->count, fmt->params.num_internal_keys);
 	msk_ctx.flg_wrd = flg_wrd;
 	memcpy(fmt->private.msk_ctx,
@@ -300,6 +332,9 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
 	status_init(&get_progress, 0);
 
 	rpp_process_rule(&rpp_ctx);
+	if (!strcmp((const char*)db->format->params.label, "lm-opencl") ||
+	    !strcmp((const char*)db->format->params.label, "lm"))
+		lm_preprocess(&rpp_ctx, rpp_ctx.count);
 	rec_restore_mode(restore_state);
 	rec_init(db, save_state);
 
@@ -336,9 +371,6 @@ void do_mask_crack(struct db_main *db, char *mask, char *wordlist) {
 	mask_offset_buffer = (unsigned char *)mem_calloc(length);
 
 	if (file != NULL) {
-#if MASK_DEBUG
-		fprintf(stdout, "Using:wordlist:%d\n", length);
-#endif
 		rpp_ctx_restore = rpp_ctx;
 		index = 0;
 		while (fgets(line, sizeof(line), file) != NULL) {
@@ -379,9 +411,6 @@ close_file:
 	}
 
 	else {
-#if MASK_DEBUG
-		fprintf(stdout, "NOT Using:wordlist\n");
-#endif
 		flag = 0;
 		while ((mask_word = msk_next(&rpp_ctx, &msk_ctx, &flag))) {
 			if (options.node_count) {

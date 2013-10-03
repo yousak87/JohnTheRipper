@@ -159,11 +159,11 @@ void opencl_LM_reset(struct db_main *db) {
 
 static void check_mask_descrypt(struct mask_context *msk_ctx) {
 	int i, j, k ;
-	if(msk_ctx -> count > 8) msk_ctx -> count = 8;
+	if(msk_ctx -> count > 7) msk_ctx -> count = 7;
 
   /* Assumes msk_ctx -> activeRangePos[] is sorted. Check if any range exceeds des key limit */
 	for( i = 0; i < msk_ctx->count; i++)
-		if(msk_ctx -> activeRangePos[i] >= 8) {
+		if(msk_ctx -> activeRangePos[i] >= 7) {
 			msk_ctx->count = i;
 			break;
 		}
@@ -183,14 +183,14 @@ static void check_mask_descrypt(struct mask_context *msk_ctx) {
 		i++;
 		j++;
 	}
-	while ((i+msk_ctx->count) < 8) {
+	while ((i+msk_ctx->count) < 7) {
 		msk_ctx -> activeRangePos[msk_ctx -> count + i] = j;
 		i++;
 		j++;
 	}
 
 	/* Zeroes the character count for non-active portion. This is helpful in regenerating password in host. */
-	for(i = msk_ctx->count; i < 8; i++) {
+	for(i = msk_ctx->count; i < 7; i++) {
 		msk_ctx->ranges[msk_ctx -> activeRangePos[i]].count = 0;
 	}
 
@@ -210,7 +210,7 @@ void opencl_LM_init_global_variables() {
 	B = (DES_bs_vector*) mem_alloc ((MULTIPLIER + 15)* 2 * sizeof(DES_bs_vector));
 	opencl_DES_bs_all = (opencl_DES_bs_combined*) mem_alloc (((MULTIPLIER >> DES_BS_LOG2) + 15) * sizeof(opencl_DES_bs_combined));
 	opencl_DES_bs_data = (opencl_DES_bs_transfer*) mem_alloc (((MULTIPLIER >> DES_BS_LOG2) + 15) * sizeof(opencl_DES_bs_transfer));
-	input_keys = (unsigned char *) mem_alloc( MULTIPLIER * 8);
+	input_keys = (unsigned char *) mem_alloc( MULTIPLIER * 7);
 }
 
 /* Mask mode */
@@ -219,7 +219,7 @@ void opencl_DES_bs_set_key_mm(char *key, int index)
 	keyCount++;
 	if(!keys_changed) {
 		keys_changed = 1;
-		memset(input_keys, 0 , 8 * MULTIPLIER);
+		memset(input_keys, 0 , 7 * MULTIPLIER);
 	}
 	memcpy(input_keys + 7 * index, key , 7);
 
