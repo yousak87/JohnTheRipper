@@ -134,7 +134,7 @@ static void *binary(char *ciphertext)
 
 static char *source(char *source, void *binary)
 {
-	return split(opencl_DES_bs_get_source_LM(binary), 0, NULL);
+	return split(opencl_get_source_LM(binary), 0, NULL);
 }
 
 static int binary_hash_0(void *binary)
@@ -180,7 +180,7 @@ static int binary_hash_6(void *binary)
 #define get_hash_5 opencl_LM_get_hash_5
 #define get_hash_6 opencl_LM_get_hash_6
 
-static int cmp_all(void *binary, int count) 
+static int cmp_all(void *binary, int count)
 {
 	return 1;
 }

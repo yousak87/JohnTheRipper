@@ -148,7 +148,7 @@ void opencl_LM_set_key_self_test(char *key, int index)
 	if(index == 13) key="BLOWJOB";
 	if(index == 14) key="FRIED";
 	if(index == 15) key="AWEFUL";
-	
+
 	if(index == 16) key="ADVANCE";
 	if(index == 17) key="RADEON";
 	if(index == 18) key="GRAPHIC";
@@ -165,7 +165,7 @@ void opencl_LM_set_key_self_test(char *key, int index)
 	if(index == 29) key="BLOWJOB";
 	if(index == 30) key="FRIED";
 	if(index == 31) key="AWEFUL";
-	
+
 	if(index < 32)
 		fprintf(stderr, "Set_key:%d %s\n", index, key);
 */
@@ -258,7 +258,7 @@ WORD *opencl_get_binary_LM(char *ciphertext)
 	return DES_bs_get_binary_raw(opencl_LM_do_IP(block), 1);
 }
 
-char *opencl_DES_bs_get_source_LM(WORD *raw)
+char *opencl_get_source_LM(WORD *raw)
 {
 	static char out[17];
 	char *p;

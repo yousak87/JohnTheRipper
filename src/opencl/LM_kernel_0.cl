@@ -68,38 +68,8 @@
 	s8(y(59, 90), y(60, 91), y(61, 92),\
 	y(62, 93), y(63, 94), y(32, 95),\
 	B, 4, 26, 14, 20);
-	
-#ifdef _CPU
-#define loop_body()\
-		H1();\
-		if (rounds_and_swapped == 0x100) goto next;\
-		H2();\
-		k += 96;\
-		rounds_and_swapped--;\
-		H1();\
-		if (rounds_and_swapped == 0x100) goto next;\
-		H2();\
-		k += 96;\
-		rounds_and_swapped--;\
-                barrier(CLK_LOCAL_MEM_FENCE);
-#elif defined(_NV)
-#define loop_body()\
-		H1();\
-		if (rounds_and_swapped == 0x100) goto next;\
-		H2();\
-		k += 96;\
-		rounds_and_swapped--;\
-		barrier(CLK_LOCAL_MEM_FENCE);
-#else
-#define loop_body()\
-		H1();\
-		if (rounds_and_swapped == 0x100) goto next;\
-		H2();\
-		k += 96;\
-		rounds_and_swapped--;
-#endif
 
-void des_loop(__private vtype *B,
+inline void lm_loop(__private vtype *B,
 	      __local DES_bs_vector *_local_K,
 	      __local ushort *_local_index768,
 	      constant uint *index768,
@@ -107,14 +77,14 @@ void des_loop(__private vtype *B,
 
 		int k = 0, rounds = 8;
 
-		do { 
+		do {
 			H1();
 			H2();
 			k += 96;
 		} while(--rounds);
 }
 
-__kernel void DES_bs_25_self_test( constant uint *index768 __attribute__((max_constant_size(3072))),
+__kernel void lm_self_test( constant uint *index768 __attribute__((max_constant_size(3072))),
 			__global int *index96 ,
 			__global DES_bs_transfer *DES_bs_all,
 			__global DES_bs_vector *B_global)  {
@@ -143,7 +113,7 @@ __kernel void DES_bs_25_self_test( constant uint *index768 __attribute__((max_co
 		}
 
 		barrier(CLK_LOCAL_MEM_FENCE);
-#endif			
+#endif
 		vtype z = vzero, o = vones;
 		DES_bs_set_block_8(B, 0, z, z, z, z, z, z, z, z);
 		DES_bs_set_block_8(B, 8, o, o, o, z, o, z, z, z);
@@ -153,16 +123,14 @@ __kernel void DES_bs_25_self_test( constant uint *index768 __attribute__((max_co
 		DES_bs_set_block_8(B, 40, z, z, z, z, z, o, z, z);
 		DES_bs_set_block_8(B, 48, o, o, z, z, z, z, o, z);
 		DES_bs_set_block_8(B, 56, o, z, o, z, o, o, o, o);
-		
-		DES_bs_finalize_keys_bench(section, DES_bs_all, local_offset_K, _local_K);
-		des_loop(B, _local_K, _local_index768, index768, local_offset_K);
+
+		LM_finalize_keys_bench(section, DES_bs_all, local_offset_K, _local_K);
+		lm_loop(B, _local_K, _local_index768, index768, local_offset_K);
 		for (i = 0; i < 64; i++)
 			B_global[global_offset_B + i] = (DES_bs_vector)B[i];
-
-
 }
 
- __kernel void DES_bs_25_mm( constant uint *index768 __attribute__((max_constant_size(3072))),
+ __kernel void lm_mm( constant uint *index768 __attribute__((max_constant_size(3072))),
 			__global int *index96 ,
 			__global DES_bs_vector *B_global,
 			__global int *binary,
@@ -173,7 +141,7 @@ __kernel void DES_bs_25_self_test( constant uint *index768 __attribute__((max_co
 
 		unsigned int section = get_global_id(0), global_offset_B ,local_offset_K;
 		unsigned int local_id = get_local_id(0), activeRangeCount, offset ;
-		int iterations, i, loop_count;
+		int i, loop_count;
 		unsigned char input_key[8], activeRangePos[8], rangeNumChars[3], start[3];
 		global_offset_B = 64 * section;
 		local_offset_K  = 56 * local_id;
@@ -227,8 +195,7 @@ __kernel void DES_bs_25_self_test( constant uint *index768 __attribute__((max_co
 
 		barrier(CLK_LOCAL_MEM_FENCE);
 #endif
-
-		DES_bs_finalize_keys_passive(local_offset_K, _local_K, activeRangePos, activeRangeCount, input_key);
+		LM_finalize_keys_passive(local_offset_K, _local_K, activeRangePos, activeRangeCount, input_key);
 
 		offset =0;
 		i = 1;
@@ -243,21 +210,18 @@ __kernel void DES_bs_25_self_test( constant uint *index768 __attribute__((max_co
 			DES_bs_set_block_8(B, 40, z, z, z, z, z, o, z, z);
 			DES_bs_set_block_8(B, 48, o, o, z, z, z, z, o, z);
 			DES_bs_set_block_8(B, 56, o, z, o, z, o, o, o, o);
-			DES_bs_finalize_keys_active(local_offset_K, _local_K, offset, activeRangePos, activeRangeCount, range, rangeNumChars, input_key, start);
+			LM_finalize_keys_active(local_offset_K, _local_K, offset, activeRangePos, activeRangeCount, range, rangeNumChars, input_key, start);
 
-			iterations = 25;
-			des_loop(B, _local_K, _local_index768, index768, local_offset_K);
-
+			lm_loop(B, _local_K, _local_index768, index768, local_offset_K);
 			cmp_s( B, binary, num_loaded_hash, B_global, offset, outKeyIdx, section);
 
 			offset = i*32;
 			i++;
 
 		} while (i <= loop_count);
-
 }
 
-__kernel void DES_bs_25_om( constant uint *index768 __attribute__((max_constant_size(3072))),
+__kernel void lm_om( constant uint *index768 __attribute__((max_constant_size(3072))),
 			__global int *index96 ,
 			__global DES_bs_transfer *DES_bs_all,
 			__global DES_bs_vector *B_global,
@@ -267,7 +231,7 @@ __kernel void DES_bs_25_om( constant uint *index768 __attribute__((max_constant_
 
 		unsigned int section = get_global_id(0), global_offset_B ,local_offset_K;
 		unsigned int local_id = get_local_id(0) ;
-		int iterations, i;
+		int i;
 		global_offset_B = 64 * section;
 		local_offset_K  = 56 * local_id;
 
@@ -295,7 +259,7 @@ __kernel void DES_bs_25_om( constant uint *index768 __attribute__((max_constant_
 				outKeyIdx[i] = outKeyIdx[i + num_loaded_hash] = 0;
 		barrier(CLK_GLOBAL_MEM_FENCE);
 
-		DES_bs_finalize_keys_bench(section, DES_bs_all, local_offset_K, _local_K);
+		LM_finalize_keys_bench(section, DES_bs_all, local_offset_K, _local_K);
 		vtype z = vzero, o = vones;
 		DES_bs_set_block_8(B, 0, z, z, z, z, z, z, z, z);
 		DES_bs_set_block_8(B, 8, o, o, o, z, o, z, z, z);
@@ -305,7 +269,7 @@ __kernel void DES_bs_25_om( constant uint *index768 __attribute__((max_constant_
 		DES_bs_set_block_8(B, 40, z, z, z, z, z, o, z, z);
 		DES_bs_set_block_8(B, 48, o, o, z, z, z, z, o, z);
 		DES_bs_set_block_8(B, 56, o, z, o, z, o, o, o, o);
-		des_loop(B, _local_K, _local_index768, index768, local_offset_K);
+		lm_loop(B, _local_K, _local_index768, index768, local_offset_K);
 		cmp_s( B, binary, num_loaded_hash, B_global, 0, outKeyIdx, section);
 
 }

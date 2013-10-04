@@ -90,41 +90,26 @@ extern void opencl_LM_init(int LM, int cpt,int block);
 extern void opencl_LM_init_global_variables(void);
 
 /*
- * Set a key for DES_bs_crypt() or DES_bs_crypt_LM(), respectively.
+ * Set a key for DES_bs_crypt_LM(), respectively.
  */
-extern void opencl_DES_bs_set_key_self_test(char *key, int index);
+extern void opencl_LM_set_key_self_test(char *key, int index);
 extern char* opencl_LM_get_key_self_test(int index);
 extern void opencl_LM_set_key_self_test(char *key, int index);
 
-/*
- * Almost generic implementation: 24-bit salts, variable iteration count.
- */
-/*
-extern void opencl_DES_bs_crypt(int count, int keys_count);
-*/
-/*
- * A simplified special-case implementation: 12-bit salts, 25 iterations.
- */
 extern int opencl_LM_self_test(int *pcount, struct db_salt *salt);
 
-/*
- * Another special-case version: a non-zero IV, no salts, no iterations.
- */
-/*
-extern void opencl_DES_bs_crypt_LM(int keys_count);
-*/
 /*
  * Converts an ASCII ciphertext to binary to be used with one of the
  * comparison functions.
  */
-extern WORD *opencl_DES_bs_get_binary(char *ciphertext);
+extern WORD *opencl_LM_get_binary(char *ciphertext);
 
 /*
  * Similarly, for LM hashes.
  */
 extern WORD *opencl_get_binary_LM(char *ciphertext);
 
-extern char *opencl_DES_bs_get_source_LM(WORD *raw);
+extern char *opencl_get_source_LM(WORD *raw);
 
 /*
  * Calculate a hash for a DES_bs_crypt() output.
@@ -144,7 +129,7 @@ extern int opencl_LM_cmp_one(void *binary, int index);
 
 /*
  * Returns the iteration count for DES_std_crypt().
- 
+
 extern WORD opencl_DES_raw_get_count(char *ciphertext);*/
 
 /*

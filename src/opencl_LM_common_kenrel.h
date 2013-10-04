@@ -286,7 +286,7 @@ inline void cmp_s( __private vtype *B,
 
 }
 
-inline void DES_bs_finalize_keys_bench(unsigned int section,
+inline void LM_finalize_keys_bench(unsigned int section,
 				__global DES_bs_transfer *DES_bs_all,
 				int local_offset_K,
 				__local DES_bs_vector *K) {
@@ -324,7 +324,7 @@ inline void DES_bs_finalize_keys_bench(unsigned int section,
 	}
 }
 
-void load_v_active(__private kvtype *v, unsigned int weight, unsigned int j, unsigned int modulo, __local uchar *range, int idx, uint offset, uint start) {
+inline void load_v_active(__private kvtype *v, unsigned int weight, unsigned int j, unsigned int modulo, __local uchar *range, int idx, uint offset, uint start) {
 	unsigned int a, b, c, d;
 
 	a = (j + offset) /  weight ;
@@ -354,7 +354,7 @@ void load_v_active(__private kvtype *v, unsigned int weight, unsigned int j, uns
 	v[0] = (a) | (unsigned int)(b << 8) | (unsigned int)(c << 16) | (unsigned int)(d << 24) ;
 }
 
-void DES_bs_finalize_keys_active(int local_offset_K,
+inline void LM_finalize_keys_active(int local_offset_K,
 			   __local DES_bs_vector *K,
 			   unsigned int offset,
 			   __private uchar *activeRangePos,
@@ -403,7 +403,7 @@ void DES_bs_finalize_keys_active(int local_offset_K,
 
 }
 
-void DES_bs_finalize_keys_passive(int local_offset_K,
+inline void LM_finalize_keys_passive(int local_offset_K,
 			   __local DES_bs_vector *K,
 			   __private uchar *activeRangePos,
 			   uint activeRangeCount,
