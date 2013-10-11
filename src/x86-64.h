@@ -17,7 +17,11 @@
 #ifndef _JOHN_ARCH_H
 #define _JOHN_ARCH_H
 
+#ifdef __ILP32__
 #define ARCH_WORD			long long
+#else
+#define ARCH_WORD			long
+#endif
 #define ARCH_SIZE			8
 #define ARCH_BITS			64
 #define ARCH_BITS_LOG			6
@@ -149,7 +153,7 @@
 #define DES_BS_ALGORITHM_NAME		"DES 128/128 AVX-16"
 #endif
 #endif
-#elif defined(__SSE2__) && defined(_OPENMP)
+#elif defined(__ILP32__) || (defined(__SSE2__) && defined(_OPENMP))
 #define DES_BS_ASM			0
 #if 1
 #define DES_BS_VECTOR			2

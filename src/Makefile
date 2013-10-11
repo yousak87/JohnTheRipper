@@ -185,7 +185,7 @@ OCL_OBJS = \
 	opencl_odf_aes_fmt.o opencl_sha2_common.o opencl_blockchain_fmt.o \
 	opencl_pbkdf2_hmac_sha256_fmt.o \
 	opencl_mscash_fmt.o opencl_rakp_fmt.o opencl_LM_fmt.o \
-	opencl_LM_std.o opencl_LM_ocl.o
+	opencl_LM_std.o opencl_LM_ocl.o opencl_krb5pa-md5_fmt.o
 # opencl_keyring_fmt.o opencl_7z_fmt.o
 
 CUDA_OBJS = \
