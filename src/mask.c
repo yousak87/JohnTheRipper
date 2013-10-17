@@ -97,7 +97,7 @@ static int restore_state(FILE *file)
 
 	if (fscanf(file, "%u\n", &seq) != 1)
 		return 1;
-	if (fscanf(file, "%s\n", rpp_ctx.output) != 1)
+	if (fscanf(file, "%128[^\n]\n", rpp_ctx.output) != 1)
 		return 1;
 	if (fscanf(file, "%d\n", &rpp_ctx.count) != 1)
 		return 1;
