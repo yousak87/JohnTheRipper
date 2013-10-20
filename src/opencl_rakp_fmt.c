@@ -114,7 +114,7 @@ static int valid(char *ciphertext, struct fmt_main *self)
 static void clear_keys(void);
 static void set_key(char *key, int index);
 
-static void create_clobj(int kpc, struct fmt_main *self)
+static void create_clobj(size_t kpc, struct fmt_main *self)
 {
 	global_work_size = kpc;
 	kpc *= v_width;
@@ -175,7 +175,7 @@ static void done(void)
 	HANDLE_CLERROR(clReleaseProgram(program[ocl_gpu_id]), "Error releasing program");
 }
 
-static cl_ulong gws_test(int gws, int do_benchmark, struct fmt_main *self)
+static cl_ulong gws_test(size_t gws, int do_benchmark, struct fmt_main *self)
 {
 	cl_ulong startTime, endTime;
 	cl_event Event[4];
@@ -231,8 +231,8 @@ static cl_ulong gws_test(int gws, int do_benchmark, struct fmt_main *self)
 	if (do_benchmark)
 		fprintf(stderr, "crypt %.2f ms, ", (double)(endTime-startTime)/1000000.);
 
-	/* 200 ms duration limit for GCN to avoid ASIC hangs */
-	if (amd_gcn(device_info[ocl_gpu_id]) && endTime - startTime > 200000000) {
+	/* 200 ms duration limit */
+	if (endTime - startTime > 200000000) {
 		if (do_benchmark)
 			fprintf(stderr, "exceeds 200 ms\n");
 		release_clobj();
