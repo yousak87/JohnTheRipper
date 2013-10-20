@@ -229,6 +229,20 @@ static void init(struct fmt_main *self)
 #endif
 	}
 
+#if 0
+	// Obey device limits
+	if (local_work_size > get_current_work_group_size(ocl_gpu_id, crypt_kernel))
+		local_work_size = get_current_work_group_size(ocl_gpu_id, crypt_kernel);
+	max_mem = get_max_mem_alloc_size(ocl_gpu_id);
+	while (global_work_size > MIN((1<<26)*4/56, max_mem / BUFSIZE))
+		global_work_size -= local_work_size;
+
+	if (global_work_size)
+		create_clobj(global_work_size, self);
+	else {
+		find_best_gws(self, ocl_gpu_id);
+	}
+#endif
 	// Current key_idx can only hold 26 bits of offset so
 	// we can't reliably use a GWS higher than 4.7M or so.
 	if (sizeof(key_idx) < 8)

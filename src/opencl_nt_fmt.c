@@ -275,8 +275,9 @@ static void init(struct fmt_main *self){
 	zero = clCreateKernel(program[ocl_gpu_id], "zero", &ret_code);
 	HANDLE_CLERROR(ret_code, "Error creating kernel. Double-check kernel name?");
 
-	/* Note: we ask for the kernels' max sizes, not the device's! */
-	HANDLE_CLERROR(clGetKernelWorkGroupInfo(crypt_kernel, devices[ocl_gpu_id], CL_KERNEL_WORK_GROUP_SIZE, sizeof(maxsize), &maxsize, NULL), "Query max workgroup size");
+	/* Note: we ask for the kernel's max size, not the device's! */
+	maxsize = get_current_work_group_size(ocl_gpu_id, crypt_kernel);
+
 	while (local_work_size > maxsize)
 		local_work_size >>= 1;
 
