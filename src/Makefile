@@ -42,18 +42,25 @@ OMPFLAGS =
 # icc with OpenMP (for make target linux-x86-64-icc)
 #ICCOMPFLAGS = -openmp
 
+# This should be commented out in Git but active in release tarballs
+#RELEASE_BLD = -DJTR_RELEASE_BUILD
+
+ifndef RELEASE_BLD
 # Try to auto-detect NSS (and NSPR) flag, needed for mozilla format.
 NSS_CFLAGS = `pkg-config 2>/dev/null --cflags nss`
 HAVE_NSS = $(NSS_CFLAGS) `pkg-config 2>/dev/null --exists nss && echo -DHAVE_NSS`
 NSS_LDFLAGS = `pkg-config 2>/dev/null --libs nss`
+endif
 
 # Try to auto-detect GMP and KRB5 libs. The grep is needed in case some of the
 # paths does not exist, because find will return false even though finding a
 # file. If these hacks do not work, comment them out and see next sections.
+ifndef RELEASE_BLD
 HAVE_GMP = `find 2>&1 /usr/include /usr/local/include -name "gmp.h" | grep -q "gmp.h" && echo -DHAVE_GMP`
 GMP_LDFLAGS = `find 2>&1 /usr/include /usr/local/include -name "gmp.h" | grep -q "gmp.h" && echo -lgmp`
 HAVE_KRB5 = `find 2>&1 /usr/include/ /usr/local/include/ -name "krb5.h" | grep -q "krb5.h" && echo -DHAVE_KRB5`
 KRB5_LDFLAGS = `find 2>&1 /usr/include/ /usr/local/include/ -name "krb5.h" | grep -q "krb5.h" && echo -lk5crypto -lkrb5`
+endif
 
 # Uncomment the below if you have GMP library installed (faster wowsrp format)
 # in case the auto-detection does not work.
@@ -87,7 +94,7 @@ AMDAPP = -DAMDAPPSDK
 OCLROOT = $(ATISTREAMSDKROOT)
 endif
 
-CFLAGS = -c -Wall -Wdeclaration-after-statement -O2 -fomit-frame-pointer -I/usr/local/include $(HAVE_NSS) $(HAVE_GMP) $(HAVE_KRB5) $(OMPFLAGS) $(AMDAPP) $(JOHN_CFLAGS)
+CFLAGS = -c -Wall -Wdeclaration-after-statement -O2 -fomit-frame-pointer -I/usr/local/include $(HAVE_NSS) $(HAVE_GMP) $(HAVE_KRB5) $(OMPFLAGS) $(AMDAPP) $(JOHN_CFLAGS) $(RELEASE_BLD)
 # -DHAVE_SKEY
 # CFLAGS for use on the main john.c file only
 CFLAGS_MAIN = $(CFLAGS)
@@ -1458,7 +1465,7 @@ macosx-x86-64-gpu:
 		ASFLAGS="$(ASFLAGS) -m64 -DUNDERSCORES -DBSD -DALIGN_LOG" \
 		CFLAGS="$(CFLAGS) -m64 -I$(OCLROOT)/include -I$(CUDAPATH)/include -DBSD -DHAVE_CRYPT -DHAVE_OPENCL -DHAVE_CUDA -Wno-deprecated-declarations" \
 		LDFLAGS="$(LDFLAGS) -m64 -L$(CUDAPATH)/lib -lcudart -framework OpenCL" \
-		NVCC_FLAGS="$(NVCC_FLAGS) -m64 -ccbin=/usr/bin/llvm-gcc"
+		NVCC_FLAGS="$(NVCC_FLAGS) -m64 -ccbin=/usr/bin/llvm-gcc-4.2"
 	$(MKDIR) ../run/kernels/
 	$(CP_PRESERVE) opencl/*.cl ../run/kernels/
 	$(CP_PRESERVE) opencl_*.h ../run/kernels/
@@ -1479,7 +1486,7 @@ macosx-x86-64-native-gpu:
 		ASFLAGS="$(ASFLAGS) -march=native -DUNDERSCORES -DBSD -DALIGN_LOG" \
 		CFLAGS="$(CFLAGS) -march=native -I$(OCLROOT)/include -I$(CUDAPATH)/include -DHAVE_CRYPT -DHAVE_OPENCL -DHAVE_CUDA -Wno-deprecated-declarations" \
 		LDFLAGS="$(LDFLAGS) -march=native -L$(CUDAPATH)/lib -lcudart -framework OpenCL" \
-		NVCC_FLAGS="$(NVCC_FLAGS) -m64 -ccbin=/usr/bin/llvm-gcc"
+		NVCC_FLAGS="$(NVCC_FLAGS) -m64 -ccbin=/usr/bin/llvm-gcc-4.2"
 	$(MKDIR) ../run/kernels/
 	$(CP_PRESERVE) opencl/*.cl ../run/kernels/
 	$(CP_PRESERVE) opencl_*.h ../run/kernels/
@@ -1532,7 +1539,7 @@ macosx-x86-64-cuda:
 		CFLAGS="$(CFLAGS) -I$(CUDAPATH)/include -DBSD -DHAVE_CRYPT -DHAVE_CUDA -m64 -Wno-deprecated-declarations" \
 		ASFLAGS="$(ASFLAGS) -m64 -DUNDERSCORES -DBSD -DALIGN_LOG" \
 		LDFLAGS="$(LDFLAGS) -m64 -L$(CUDAPATH)/lib -lcudart" \
-		NVCC_FLAGS="$(NVCC_FLAGS) -m64 -ccbin=/usr/bin/llvm-gcc"
+		NVCC_FLAGS="$(NVCC_FLAGS) -m64 -ccbin=/usr/bin/llvm-gcc-4.2"
 	@echo "Failing after this point just means some helper tools did not build:"
 	$(MAKE) $(PROJ_CXX)
 	$(MAKE) $(PROJ_PCAP)
