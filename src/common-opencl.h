@@ -124,9 +124,9 @@ void opencl_find_best_workgroup_limit(struct fmt_main *self, size_t group_size_l
 cl_device_type get_device_type(int sequential_id);
 cl_ulong get_local_memory_size(int sequential_id);
 cl_ulong get_global_memory_size(int sequential_id);
-size_t get_max_work_group_size(int sequential_id);
+size_t get_device_max_lws(int sequential_id);
 cl_ulong get_max_mem_alloc_size(int sequential_id);
-size_t get_current_work_group_size(int sequential_id, cl_kernel crypt_kernel);
+size_t get_kernel_max_lws(int sequential_id, cl_kernel crypt_kernel);
 cl_uint get_max_compute_units(int sequential_id);
 cl_uint get_processors_count(int sequential_id);
 cl_uint get_processor_family(int sequential_id);
@@ -150,7 +150,9 @@ void handle_clerror(cl_int cl_error, const char *message, const char *file, int 
 /* Progress indicator "spinning wheel" */
 void advance_cursor(void);
 
-void listOpenCLdevices(void);
+/* List all available devices. For each one, shows a set of useful
+ * hardware/software details */
+void opencl_list_devices(void);
 
 /* Call this to check for keypress etc. within kernel loops */
 void opencl_process_event(void);
@@ -165,7 +167,7 @@ void opencl_process_event(void);
 	}
 
 /* Macro for get a multiple of a given value */
-#define GET_MULTIPLE(dividend, divisor)		 ((unsigned int) ((dividend / divisor) * divisor))
+#define GET_MULTIPLE(dividend, divisor)		((local_work_size) ? ((dividend / divisor) * divisor) : (dividend))
 
 /*
  * Shared function to find 'the best' local work group size.
@@ -217,10 +219,10 @@ void opencl_find_best_gws(int step, int show_speed,
  *       }
  *
  * - p_warnings: array of strings to be used to show the execution details.
- *   The line like this:
+ *   For example to get a line like this:
  *     - pass xfer: 10.01 ms, crypt: 3.46 ms, result xfer: 1.84 ms
- *   So, an array like this have to be used:
- *     - "salt xfer: "  ,  ", pass xfer: "  ,  ", crypt: ", ...
+ *   An array like this have to be used:
+ *     - "pass xfer: "  ,  ", crypt: ", ", result xfer: "
  * - p_to_profile_event: pointer to the main event to be profiled (in find_lws).
  * - p_self: a pointer to the format itself.
  * - p_create_clobj: function that (m)alloc all buffers needed by crypt_all.
