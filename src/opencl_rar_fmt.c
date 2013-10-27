@@ -81,9 +81,9 @@
 #define FORMAT_NAME		"RAR3"
 #define ALGORITHM_NAME		"SHA1 AES OpenCL"
 #ifdef DEBUG
-#define BENCHMARK_COMMENT	" (1-16 characters)"
+#define BENCHMARK_COMMENT	" (length 1-16)"
 #else
-#define BENCHMARK_COMMENT	" (4 characters)"
+#define BENCHMARK_COMMENT	" (length 4)"
 #endif
 #define BENCHMARK_LENGTH	-1
 
@@ -647,7 +647,7 @@ static void init(struct fmt_main *self)
 	self->params.benchmark_comment = " (1-16 characters)";
 #endif
 	/* We mimic the lengths of cRARk for comparisons */
-	if (gpu(device_info[ocl_gpu_id])) {
+	if (!cpu(device_info[ocl_gpu_id])) {
 #ifndef DEBUG
 		self->params.benchmark_comment = " (length 5)";
 #endif

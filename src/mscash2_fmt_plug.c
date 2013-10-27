@@ -207,7 +207,7 @@ char * mscash2_split(char *ciphertext, int index, struct fmt_main *self)
 	return out;
 }
 
-int mscash2_valid(char *ciphertext, int max_salt_length, const char *format_label, struct fmt_main *self)
+int mscash2_valid(char *ciphertext, int max_salt_length, struct fmt_main *self)
 {
 	unsigned int i;
 	unsigned int l;
@@ -215,7 +215,11 @@ int mscash2_valid(char *ciphertext, int max_salt_length, const char *format_labe
 	UTF16 realsalt[129];
 	int saltlen;
 
-	if (strncmp(ciphertext, "$DCC2$10240#", 12))
+	if (strncmp(ciphertext, "$DCC2$", 6))
+		return 0;
+
+	/* We demand an iteration count (after prepare()) */
+	if (strchr(ciphertext, '#') == strrchr(ciphertext, '#'))
 		return 0;
 
 	l = strlen(ciphertext);
@@ -240,12 +244,12 @@ int mscash2_valid(char *ciphertext, int max_salt_length, const char *format_labe
 
 		if (!ldr_in_pot)
 		if (!warned++)
-			fprintf(stderr, "%s: One or more hashes rejected due to salt length limitation\n", format_label);
+			fprintf(stderr, "%s: One or more hashes rejected due to salt length limitation\n", self->params.label);
 
 		return 0;
 	}
 
-	// iteration count must be less than 2^16. It must fit in a UTF16 (salt[1]);
+	// iteration count must currently be less than 2^16. It must fit in a UTF16 (salt[1]);
 	sscanf(&ciphertext[6], "%d", &i);
 	if (i >= 1<<16)
 		return 0;
@@ -255,7 +259,7 @@ int mscash2_valid(char *ciphertext, int max_salt_length, const char *format_labe
 
 static int valid(char *ciphertext, struct fmt_main *self)
 {
-	return mscash2_valid(ciphertext, 128, FORMAT_LABEL, self);
+	return mscash2_valid(ciphertext, 128, self);
 }
 
 char *mscash2_prepare(char *split_fields[10], struct fmt_main *self)
