@@ -1,4 +1,5 @@
-/* Cracker for RIPv2 MD5 authentication hashes.
+/*
+ * Cracker for TCP MD5 Signatures, http://www.ietf.org/rfc/rfc2385.txt
  *
  * This software is Copyright (c) 2013, Dhiru Kholia <dhiru [at] openwall.com>,
  * and it is hereby released to the general public under the following terms:
@@ -22,15 +23,17 @@
 #define OMP_SCALE 2048 // XXX
 #endif
 
-#define FORMAT_LABEL            "net-md5"
-#define FORMAT_NAME             "\"Keyed MD5\" RIPv2, OSPF, BGP, SNMPv2"
-#define FORMAT_TAG              "$netmd5$"
+#define FORMAT_LABEL            "tcp-md5"
+#define FORMAT_NAME             "TCP MD5 Signatures, BGP"
+#define FORMAT_TAG              "$tcpmd5$"
 #define TAG_LENGTH              (sizeof(FORMAT_TAG) - 1)
 #define ALGORITHM_NAME          "MD5 32/" ARCH_BITS_STR
 #define BENCHMARK_COMMENT       ""
 #define BENCHMARK_LENGTH        0
-// RIPv2 truncates (or null pads) passwords to length 16
-#define PLAINTEXT_LENGTH        16
+
+// Linux Kernel says "#define TCP_MD5SIG_MAXKEYLEN 80"
+#define PLAINTEXT_LENGTH        80
+
 #define BINARY_SIZE             16
 #define BINARY_ALIGN            sizeof(ARCH_WORD_32)
 #define SALT_SIZE               sizeof(struct custom_salt)
@@ -40,24 +43,14 @@
 #define HEXCHARS                "0123456789abcdef"
 
 static struct fmt_tests tests[] = {
-	/* RIPv2 MD5 authentication hashes */
-	{FORMAT_TAG "02020000ffff0003002c01145267d48d000000000000000000020000ac100100ffffff000000000000000001ffff0001$1e372a8a233c6556253a0909bc3dcce6", "quagga"},
-	{FORMAT_TAG "02020000ffff0003002c01145267d48f000000000000000000020000ac100100ffffff000000000000000001ffff0001$ed9f940c3276afcc06d15babe8a1b61b", "quagga"},
-	{FORMAT_TAG "02020000ffff0003002c01145267d490000000000000000000020000ac100100ffffff000000000000000001ffff0001$c9f7763f80fcfcc2bbbca073be1f5df7", "quagga"},
-	{FORMAT_TAG "02020000ffff0003002c01145267d49a000000000000000000020000ac100200ffffff000000000000000001ffff0001$3f6a72deeda200806230298af0797997", "quagga"},
-	{FORMAT_TAG "02020000ffff0003002c01145267d49b000000000000000000020000ac100200ffffff000000000000000001ffff0001$b69184bacccc752cadf78cac455bd0de", "quagga"},
-	{FORMAT_TAG "02020000ffff0003002c01145267d49d000000000000000000020000ac100100ffffff000000000000000001ffff0001$6442669c577e7662188865a54c105d0e", "quagga"},
-	{FORMAT_TAG "02020000ffff0003002c01145267e076000000000000000000020000ac100200ffffff000000000000000001ffff0001$4afe22cf1750d9af8775b25bcf9cfb8c", "abcdefghijklmnop"},
-	{FORMAT_TAG "02020000ffff0003002c01145267e077000000000000000000020000ac100200ffffff000000000000000001ffff0001$326b12f6da03048a655ea4d8f7e3e123", "abcdefghijklmnop"},
-	{FORMAT_TAG "02020000ffff0003002c01145267e2ab000000000000000000020000ac100100ffffff000000000000000001ffff0001$ad76c40e70383f6993f54b4ba6492a26", "abcdefghijklmnop"},
-	/* OSPFv2 MD5 authentication hashes */
-	{"$netmd5$0201002cac1001010000000000000002000001105267ff8fffffff00000a0201000000280000000000000000$445ecbb27272bd791a757a6c85856150", "abcdefghijklmnop"},
-	{FORMAT_TAG "0201002cac1001010000000000000002000001105267ff98ffffff00000a0201000000280000000000000000$d4c248b417b8cb1490e02c5e99eb0ad1", "abcdefghijklmnop"},
-	{FORMAT_TAG "0201002cac1001010000000000000002000001105267ffa2ffffff00000a0201000000280000000000000000$528d9bf98be8213482af7295307625bf", "abcdefghijklmnop"},
+	/* BGP TCP_MD5SIG hashes */
+	{"$tcpmd5$c0a83814c0a838280006002800b3d10515f72762291b6878a010007300000000$eaf8d1f1da3f03c90b42709e9508fc73", "lolcats"},
+	{"$tcpmd5$c0a83828c0a8381400060034d12100b36e73c1c300000000d002390800000000$9a75888344bf20488ebef3ee5b16dd2a", "longbutstilllamepassword"},
 	{NULL}
 };
 
 static char (*saved_key)[PLAINTEXT_LENGTH + 1];
+static int *saved_len;
 static ARCH_WORD_32 (*crypt_out)[BINARY_SIZE / sizeof(ARCH_WORD_32)];
 
 static struct custom_salt {
@@ -76,7 +69,10 @@ static void init(struct fmt_main *self)
 #endif
 	saved_key = mem_calloc_tiny(sizeof(*saved_key) *
 		self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
-	crypt_out = mem_calloc_tiny(sizeof(*crypt_out) * self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	saved_len = mem_calloc_tiny(sizeof(*saved_len) *
+		self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
+	crypt_out = mem_calloc_tiny(sizeof(*crypt_out) *
+		self->params.max_keys_per_crypt, MEM_ALIGN_WORD);
 }
 
 static int valid(char *ciphertext, struct fmt_main *self)
@@ -171,7 +167,8 @@ static int crypt_all(int *pcount, struct db_salt *salt)
 
 		MD5_Init(&ctx);
 		MD5_Update(&ctx, cur_salt->salt, cur_salt->length);
-		MD5_Update(&ctx, saved_key[index], PLAINTEXT_LENGTH);
+
+		MD5_Update(&ctx, saved_key[index], saved_len[index]);
 		MD5_Final((unsigned char*)crypt_out[index], &ctx);
 	}
 	return count;
@@ -198,8 +195,10 @@ static int cmp_exact(char *source, int index)
 	return 1;
 }
 
-static void netmd5_set_key(char *key, int index)
+static void tcpmd5_set_key(char *key, int index)
 {
+	saved_len[index] = strlen(key);
+
 	/* strncpy will pad with zeros, which is needed */
 	strncpy(saved_key[index], key, sizeof(saved_key[0]));
 }
@@ -209,7 +208,7 @@ static char *get_key(int index)
 	return saved_key[index];
 }
 
-struct fmt_main fmt_netmd5 = {
+struct fmt_main fmt_tcpmd5 = {
 	{
 		FORMAT_LABEL,
 		FORMAT_NAME,
@@ -247,7 +246,7 @@ struct fmt_main fmt_netmd5 = {
 		},
 		fmt_default_salt_hash,
 		set_salt,
-		netmd5_set_key,
+		tcpmd5_set_key,
 		get_key,
 		fmt_default_clear_keys,
 		crypt_all,

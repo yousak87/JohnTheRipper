@@ -650,6 +650,7 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 	HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0, (salt->count) * sizeof(unsigned int), outKeyIdx, 0, NULL, NULL), "Write FAILED\n");
 	cmp_out = 0;
 
+<<<<<<< HEAD
 	// If a positive match is found outKeyIdx contains some positive (gid | 0x80000000) value else contains 0
 	for(i = 0; i < ((salt->count) & (~cmp_out)); i++)
 		cmp_out = outKeyIdx[i]?0xffffffff:0;
@@ -668,6 +669,32 @@ static int opencl_DES_bs_crypt_25_mm(int *pcount, struct db_salt *salt)
 			}
 		}
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu, CL_TRUE, 0, (salt -> count) * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL), "Write FAILED\n");
+=======
+		for (i = 0; i < salt->count; i++) {
+			if (!cmp_out[i]) {
+				cmp_out[i] = ~(unsigned int)0;
+				continue;
+			}
+			if (cmp_out[i] > max)
+				max = cmp_out[i];
+			cmp_out[i]--;
+			if (cmp_out[i] < min)
+				min = cmp_out[i];
+		}
+
+		if (max--) {
+			HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu,CL_TRUE, 0, MULTIPLIER * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL),"Write FAILED\n");
+			clFinish(queue[ocl_gpu_id]);
+			return (max + 1) * DES_BS_DEPTH;
+		} else
+			return 0;
+
+	}
+
+	else {
+
+		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu, CL_TRUE, 0, MULTIPLIER * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL),"Write FAILED\n");
+>>>>>>> bleeding-jumbo
 		clFinish(queue[ocl_gpu_id]);
 #if DES_DEBUG
 		printf("crypt all %d\n",max + 1);
@@ -728,6 +755,7 @@ int opencl_DES_bs_crypt_25_om(int *pcount, struct db_salt *salt)
 	HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], buffer_outKeyIdx, CL_TRUE, 0, (salt->count) * sizeof(unsigned int), outKeyIdx, 0, NULL, NULL), "Write FAILED\n");
 	cmp_out = 0;
 
+<<<<<<< HEAD
 	// If a positive match is found outKeyIdx contains some positive (gid | 0x80000000) value else contains 0
 	for(i = 0; i < ((salt->count) & (~cmp_out)); i++)
 		cmp_out = outKeyIdx[i]?0xffffffff:0;
@@ -746,6 +774,32 @@ int opencl_DES_bs_crypt_25_om(int *pcount, struct db_salt *salt)
 			}
 		}
 		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu, CL_TRUE, 0, (salt -> count) * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL), "Write FAILED\n");
+=======
+		for (i = 0; i < salt->count; i++) {
+			if (!cmp_out[i]) {
+				cmp_out[i] = ~(unsigned int)0;
+				continue;
+			}
+			if (cmp_out[i] > max)
+				max = cmp_out[i];
+			cmp_out[i]--;
+			if (cmp_out[i] < min)
+				min = cmp_out[i];
+		}
+
+		if (max--) {
+			HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu, CL_TRUE, 0, MULTIPLIER * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL), "Write FAILED\n");
+			clFinish(queue[ocl_gpu_id]);
+			return (max + 1) * DES_BS_DEPTH;
+		} else
+			return 0;
+
+	}
+
+	else {
+
+		HANDLE_CLERROR(clEnqueueReadBuffer(queue[ocl_gpu_id], B_gpu, CL_TRUE, 0, MULTIPLIER * 64 * sizeof(DES_bs_vector), B, 0, NULL, NULL), "Write FAILED\n");
+>>>>>>> bleeding-jumbo
 		clFinish(queue[ocl_gpu_id]);
 #if DES_DEBUG
 		printf("crypt all %d\n",max + 1);
