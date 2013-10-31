@@ -25,6 +25,7 @@ SED = sed
 NULL = /dev/null
 CPPFLAGS = -E
 SORT = sort
+STRIP = strip
 
 ## Uncomment the line below for MPI (can be used together with OMP as well)
 ## For experimental MPI_Abort support, append -DJOHN_MPI_ABORT too.
@@ -292,14 +293,15 @@ default:
 	@echo "	make clean SYSTEM"
 	@echo "where SYSTEM can be one of the following:"
 	@echo "([i] is an optional letter for pre-built intrinsics, eg. -sse2i vs -sse2):"
-	@echo "linux-x86-64-native      Linux, x86-64 'native' (all CPU features you've got)"
-	@echo "linux-x86-X32-native     Linux, X32-ABI 'native' (all CPU features you've got)"
-	@echo "linux-x86-64-gpu         Linux, x86-64 'native', CUDA and OpenCL (experimental)"
-	@echo "linux-x86-64-opencl      Linux, x86-64 'native', OpenCL (experimental)"
-	@echo "linux-x86-64-cuda        Linux, x86-64 'native', CUDA (experimental)"
+	@echo "linux-x86-64-native      Linux, x86-64 (enabling all CPU features you've got)"
+	@echo "linux-X32-native         Linux, X32-ABI"
+#	@echo "linux-X32                Linux, X32-ABI SSE2 (for testing)"
+	@echo "linux-x86-64-gpu         Linux, x86-64 CUDA and OpenCL"
+	@echo "linux-x86-64-opencl      Linux, x86-64 OpenCL"
+	@echo "linux-x86-64-cuda        Linux, x86-64 CUDA"
 	@echo "linux-x86-64-avx         Linux, x86-64 with AVX (2011+ Intel CPUs)"
 	@echo "linux-x86-64-xop         Linux, x86-64 with AVX and XOP (2011+ AMD CPUs)"
-	@echo "linux-x86-64[i]          Linux, x86-64 with SSE2 (most common)"
+	@echo "linux-x86-64[i]          Linux, x86-64 with SSE2 (any x86-64 CPU)"
 	@echo "linux-x86-64-icc         Linux, x86-64 compiled with icc"
 	@echo "linux-x86-64-clang       Linux, x86-64 compiled with clang"
 #	@echo "linux-x86-64-clang-debug Linux, x86-64 compiled with clang (with debugging options)
@@ -308,9 +310,9 @@ default:
 #	@echo "linux-x86-64-32-sse2[i]  Linux, x86-64, 32-bit with SSE2 (for regression tests)"
 #	@echo "linux-x86-64-32-mmx      Linux, x86-64, 32-bit with MMX (for regression tests)"
 #	@echo "linux-x86-64-32-any      Linux, x86-64, 32-bit (for regression tests)"
-	@echo "linux-x86-gpu            Linux, x86 32-bit with SSE2, CUDA and OpenCL (experimental)"
-	@echo "linux-x86-opencl         Linux, x86 32-bit with SSE2 and OpenCL (experimental)"
-	@echo "linux-x86-cuda           Linux, x86 32-bit with SSE2 and CUDA (experimental)"
+	@echo "linux-x86-gpu            Linux, x86 32-bit with SSE2, CUDA and OpenCL"
+	@echo "linux-x86-opencl         Linux, x86 32-bit with SSE2 and OpenCL"
+	@echo "linux-x86-cuda           Linux, x86 32-bit with SSE2 and CUDA"
 	@echo "linux-x86-sse2[i]        Linux, x86 32-bit with SSE2 (most common, 32-bit)"
 	@echo "linux-x86-native         Linux, x86 32-bit, with all CPU features you've got (not necessarily best)"
 	@echo "linux-x86-mmx            Linux, x86 32-bit with MMX (for old computers)"
@@ -361,11 +363,12 @@ default:
 	@echo "sco-x86-any-cc           SCO, x86, cc"
 	@echo "tru64-alpha              Tru64 (Digital UNIX, OSF/1), Alpha"
 	@echo "aix-ppc32                AIX, PowerPC 32-bit"
-	@echo "macosx-x86-64            Mac OS X 10.5+, Xcode 3.0+, x86-64 with SSE2 (best)"
+	@echo "macosx-x86-64            Mac OS X 10.5+, Xcode 3.0+, x86-64 with SSE2"
+	@echo "macosx-x86-64-native     Mac OS X 10.8+, real gcc, x86-64, see doc/INSTALL (best)"
 #	@echo "macosx-x86-64-clang-debug Mac OS X 10.5+, Xcode 3.0+, x86-64 compiled with clang (with debugging options)
-	@echo "macosx-x86-64-gpu        Mac OS X 10.5+, Xcode 3.0+, x86-64 with SSE2, CUDA and OpenCL support"
-	@echo "macosx-x86-64-opencl     Mac OS X 10.5+, Xcode 3.0+, x86-64 with SSE2, OpenCL support"
-	@echo "macosx-x86-64-cuda       Mac OS X 10.5+, Xcode 3.0+, x86-64 with SSE2, CUDA support"
+	@echo "macosx-x86-64-gpu        Mac OS X 10.6+, x86-64 with SSE2, CUDA and OpenCL support"
+	@echo "macosx-x86-64-opencl     Mac OS X 10.6+, x86-64 with SSE2, OpenCL support"
+	@echo "macosx-x86-64-cuda       Mac OS X 10.6+, x86-64 with SSE2, CUDA support"
 	@echo "macosx-x86-sse2          Mac OS X, x86 with SSE2"
 	@echo "macosx-x86-sse2-opencl   Mac OS X, x86 with SSE2 and OpenCL"
 	@echo "macosx-ppc32-altivec     Mac OS X, PowerPC w/AltiVec (best)"
@@ -381,11 +384,11 @@ default:
 	@echo "dos-djgpp-x86-mmx        DOS, DJGPP, x86 with MMX"
 	@echo "dos-djgpp-x86-any        DOS, DJGPP, x86"
 	@echo "win64-mingw-x86-64       Win64, MinGW, x86-64 with SSE2 (best)"
-	@echo "win32-cygwin-x86-sse2[i] Win32, Cygwin, x86 with SSE2 (best)"
+	@echo "win32-cygwin-x86-sse2[i] Win32, Cygwin, x86 with SSE2 (best if 32-bit)"
 	@echo "win32-cygwin-x86-opencl  Win32, Cygwin, x86 with SSE2 and OpenCL"
 	@echo "win32-cygwin-x86-mmx     Win32, Cygwin, x86 with MMX"
 	@echo "win32-cygwin-x86-any     Win32, Cygwin, x86"
-	@echo "win32-mingw-x86-sse2[i]  Win32, MinGW, x86 with SSE2 (best)"
+	@echo "win32-mingw-x86-sse2[i]  Win32, MinGW, x86 with SSE2 (best if 32-bit)"
 	@echo "win32-mingw-x86-mmx      Win32, MinGW, x86 with MMX"
 	@echo "win32-mingw-x86-any      Win32, MinGW, x86"
 	@echo "beos-x86-sse2            BeOS, x86 with SSE2 (best)"
@@ -479,7 +482,7 @@ linux-x86-64-native:
 	$(MAKE) $(PROJ_PCAP)
 	@echo "All done"
 
-linux-x86-X32-native:
+linux-X32-native:
 	$(LN) x86-64.h arch.h
 	@echo "#define JOHN_BLD" '"'$@'"' > john_build_rule.h
 	$(MAKE) $(PROJ) \
@@ -487,6 +490,19 @@ linux-x86-X32-native:
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT -DHAVE_DL -march=native -mx32" \
 		ASFLAGS="$(ASFLAGS) -march=native -mx32" \
 		LDFLAGS="$(LDFLAGS) -lcrypt -ldl -march=native -mx32"
+	@echo "Failing after this point just means some helper tools did not build:"
+	$(MAKE) $(PROJ_CXX)
+	$(MAKE) $(PROJ_PCAP)
+	@echo "All done"
+
+linux-X32:
+	$(LN) x86-64.h arch.h
+	@echo "#define JOHN_BLD" '"'$@'"' > john_build_rule.h
+	$(MAKE) $(PROJ) \
+		JOHN_OBJS="$(JOHN_OBJS) c3_fmt.o x86-64.o sse-intrinsics.o" \
+		CFLAGS="$(CFLAGS) -DHAVE_CRYPT -DHAVE_DL -mx32" \
+		ASFLAGS="$(ASFLAGS) -mx32" \
+		LDFLAGS="$(LDFLAGS) -lcrypt -ldl -mx32"
 	@echo "Failing after this point just means some helper tools did not build:"
 	$(MAKE) $(PROJ_CXX)
 	$(MAKE) $(PROJ_PCAP)
@@ -1797,7 +1813,7 @@ win64-mingw-x86-64:
 	@echo "#define JOHN_BLD" '"'$@'"' > john_build_rule.h
 	$(MAKE) $(PROJ_WIN32_MINGW) \
 		JOHN_OBJS="$(JOHN_OBJS) x86-64.o sse-intrinsics.o" \
-		CFLAGS="-c -mstackrealign -static -Wall -Wdeclaration-after-statement -O2 -fomit-frame-pointer -I/usr/local/include $(OMPFLAGS) $(AMDAPP) $(JOHN_CFLAGS) -mpreferred-stack-boundary=4" \
+		CFLAGS="-c -static -Wall -Wdeclaration-after-statement -O2 -fomit-frame-pointer -I/usr/local/include $(OMPFLAGS) $(AMDAPP) $(JOHN_CFLAGS) -mpreferred-stack-boundary=4" \
 		LDFLAGS="-static -lssl -lcrypto -lwsock32 -lws2_32 -lgdi32 -lm -lpthread.dll -lz.dll $(OMPFLAGS)" \
 		ASFLAGS="$(ASFLAGS)" \
 		CPP=$(GCC) CC=$(GCC) LD=$(GCC) CXX=$(CXX)
@@ -2233,7 +2249,7 @@ john.com: john.asm
 
 ../run/john.exe: $(JOHN_OBJS)
 	$(LD) $(JOHN_OBJS) $(LDFLAGS) -lkernel32 -o ../run/john.exe
-	# strip ../run/john.exe
+	$(STRIP) ../run/john.exe
 
 # this LD line removed from the ../run/john-mingw.exe rule (MinGW32 builds)
 # this change needed for full openssl linking, in 1.7.7-jumbo-6
@@ -2242,82 +2258,82 @@ john.com: john.asm
 
 ../run/john-mingw.exe: $(JOHN_OBJS)
 	$(LD) $(JOHN_OBJS) $(LDFLAGS) -lkernel32 -o ../run/john-mingw.exe
-	# strip ../run/john-mingw.exe
+	$(STRIP) ../run/john-mingw.exe
 	cp ../run/john-mingw.exe ../run/john.exe
 
 ../run/unshadow.exe: symlink.c
 	$(CC) symlink.c -o ../run/unshadow.exe
-	# strip ../run/unshadow.exe
+	$(STRIP) ../run/unshadow.exe
 
 ../run/unafs.exe: symlink.c
 	$(CC) symlink.c -o ../run/unafs.exe
-	strip ../run/unafs.exe
+	$(STRIP) ../run/unafs.exe
 
 ../run/undrop.exe: symlink.c
 	$(CC) symlink.c -o ../run/undrop.exe
-	strip ../run/undrop.exe
+	$(STRIP) ../run/undrop.exe
 
 ../run/ssh2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/ssh2john.exe
-	strip ../run/ssh2john.exe
+	$(STRIP) ../run/ssh2john.exe
 
 ../run/putty2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/putty2john.exe
-	strip ../run/putty2john.exe
+	$(STRIP) ../run/putty2john.exe
 
 ../run/pfx2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/pfx2john.exe
-	strip ../run/pfx2john.exe
+	$(STRIP) ../run/pfx2john.exe
 
 ../run/keepass2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/keepass2john.exe
-	strip ../run/keepass2john.exe
+	$(STRIP) ../run/keepass2john.exe
 
 ../run/keyring2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/keyring2john.exe
-	strip ../run/keyring2john.exe
+	$(STRIP) ../run/keyring2john.exe
 
 ../run/rar2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/rar2john.exe
-	strip ../run/rar2john.exe
+	$(STRIP) ../run/rar2john.exe
 
 ../run/mozilla2john.exe: symlink.c
 ifdef HAVE_NSS
 	$(CC) symlink.c -o ../run/mozilla2john.exe
-	strip ../run/mozilla2john.exe
+	$(STRIP) ../run/mozilla2john.exe
 endif
 
 ../run/racf2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/racf2john.exe
-	strip ../run/racf2john.exe
+	$(STRIP) ../run/racf2john.exe
 
 ../run/keychain2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/keychain2john.exe
-	strip ../run/keychain2john.exe
+	$(STRIP) ../run/keychain2john.exe
 
 ../run/kwallet2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/kwallet2john.exe
-	strip ../run/kwallet2john.exe
+	$(STRIP) ../run/kwallet2john.exe
 
 ../run/pwsafe2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/pwsafe2john.exe
-	strip ../run/pwsafe2john.exe
+	$(STRIP) ../run/pwsafe2john.exe
 
 ../run/dmg2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/dmg2john.exe
-	strip ../run/dmg2john.exe
+	$(STRIP) ../run/dmg2john.exe
 
 ../run/zip2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/zip2john.exe
-	strip ../run/zip2john.exe
+	$(STRIP) ../run/zip2john.exe
 
 ../run/hccap2john.exe: symlink.c
 	$(CC) symlink.c -o ../run/hccap2john.exe
-	strip ../run/hccap2john.exe
+	$(STRIP) ../run/hccap2john.exe
 
 ../run/unique.exe: symlink.c
 	$(CC) symlink.c -o ../run/unique.exe
-	strip ../run/unique.exe
+	$(STRIP) ../run/unique.exe
 
 ../run/genmkvpwd: $(GENMKVPWD_OBJS)
 	$(LD) $(GENMKVPWD_OBJS) $(LDFLAGS) -o ../run/genmkvpwd

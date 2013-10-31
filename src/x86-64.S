@@ -24,9 +24,12 @@
  *
  * Addition of single DES encryption with no salt by Deepika Dutta Mishra
  * <dipikadutta at gmail.com> in 2013, no rights reserved.
-
+ *
  * ...with changes in the jumbo patch, by Alain Espinosa (starting with a
- * comment further down this file) and magnum.
+ * comment further down this file).
+ *
+ * Various tweaks & fixes and support for Win64 and Linux-X32 ABIs by
+ * magnum 2010-2013.
  */
 
 #include "arch.h"
@@ -35,10 +38,11 @@
 /*
  * MS use a different x64 calling convention than everyone else:
  * Arguments: RCX, RDX, R8, R9 then stack right-to-left.
- * Non-volatile: R12:R15, RBX, RBP, RDI, RSI, RSP, XMM6:XMM15
+ * Volatile: RAX, RCX, RDX, R8, R9, R10, R11, XMM0:XMM5
+ * Non-volatile: RBX, RBP, RSI, RDI, R12:R15, XMM6:XMM15
  * Return: RAX.
  */
-#define ARG1 %rcx
+#define ARG1				%rcx
 #define PROLOGUE \
 	subq $(8+10*16), %rsp; \
 	movapd %xmm6, 0*16(%rsp); \
@@ -50,8 +54,13 @@
 	movapd %xmm12, 6*16(%rsp); \
 	movapd %xmm13, 7*16(%rsp); \
 	movapd %xmm14, 8*16(%rsp); \
-	movapd %xmm15, 9*16(%rsp)
+	movapd %xmm15, 9*16(%rsp); \
+	push %rdi; \
+	push %rsi
+
 #define EPILOGUE \
+	pop %rsi; \
+	pop %rdi; \
 	movapd 0*16(%rsp), %xmm6; \
 	movapd 1*16(%rsp), %xmm7; \
 	movapd 2*16(%rsp), %xmm8; \
@@ -67,32 +76,28 @@
 /*
  * System V AMD64 ABI (followed by everybody else including linux-X32):
  * Arguments: RDI, RSI, RDX, RCX, R8, R9 then stack right-to-left.
- * Non-volatile: R12:R15, RBX, RBP
+ * Volatile: RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11, XMM0:XMM15
+ * Non-volatile: RBX, RBP, R12:R15
  * Return: RAX.
  */
-#define ARG1 %rdi
+#define ARG1				%rdi
 #define PROLOGUE
 #define EPILOGUE
 #endif
 
 /*
- * Some broken systems don't offer section alignments larger than 8 bytes,
- * while for the SSE code we need at least a 16 byte alignment.  ALIGN_FIX
- * is here to work around this issue when we happen to get bad addresses.
- * We haven't actually seen this on any 64-bit system as of yet.
+ * Throughout this file ARG1 is *pcount so it's 32-bit for X32, although
+ * using (%rdi) works fine too without any warnings.
  */
-#ifndef ALIGN_FIX
+#ifdef __ILP32__
+#undef ARG1
+#define ARG1				%edi
+#endif
+
 #ifdef ALIGN_LOG
 #define DO_ALIGN(log)			.align log
 #else
 #define DO_ALIGN(log)			.align 1 << log
-#endif
-#else
-#ifdef ALIGN_LOG
-#define DO_ALIGN(log)			.align log; .space ALIGN_FIX
-#else
-#define DO_ALIGN(log)			.align 1 << log; .space ALIGN_FIX
-#endif
 #endif
 
 #if DES_BS_ASM
@@ -104,6 +109,7 @@
 #define DES_bs_crypt_25			_DES_bs_crypt_25
 #define DES_bs_crypt_LM			_DES_bs_crypt_LM
 #define DES_bs_crypt_plain		_DES_bs_crypt_plain
+#define DES_bs_P			_DES_bs_P
 #endif
 
 #ifdef __sun
@@ -115,25 +121,17 @@
 #endif
 
 /* Sun's assembler can't multiply, but at least it can add... */
+#ifdef __ILP32__
+#define nptr(n)				n+n+n+n
+#else
 #define nptr(n)				n+n+n+n+n+n+n+n
+#endif
 #define nvec(n)				n+n+n+n+n+n+n+n+n+n+n+n+n+n+n+n
 
 #ifdef BSD
 .data
 #else
 .bss
-#endif
-
-#ifdef UNDERSCORES
-.globl _P
-DO_ALIGN(6)
-_P:
-DO_SPACE(nvec(64))
-#else
-.globl P
-DO_ALIGN(6)
-P:
-DO_SPACE(nvec(64))
 #endif
 
 .globl DES_bs_all
@@ -163,14 +161,15 @@ DO_SPACE(4)
 DES_bs_all_Ens:
 DO_SPACE(nptr(48))
 
+.globl DES_bs_P
+DO_ALIGN(6)
+DES_bs_P:
+DO_SPACE(nvec(64))
+
 #define E(i)				DES_bs_all_E+nptr(i)(%rip)
 #define B(i)				DES_bs_all_B+nvec(i)(%rip)
 #define tmp_at(i)			DES_bs_all_tmp+nvec(i)(%rip)
-#ifdef UNDERSCORES
-#define P(i)				_P+nvec(i)(%rip)
-#else
-#define P(i)				P+nvec(i)(%rip)
-#endif
+#define P(i)				DES_bs_P+nvec(i)(%rip)
 
 #define pnot				tmp_at(0)
 
@@ -744,24 +743,31 @@ DO_SPACE(nptr(48))
 #define k(i)				nptr(i)(k_ptr)
 
 #define tmp1				%rcx
-#define tmp2				%r9 /* %rsi is non-volatile on win64 */
+#define tmp2				%rsi
+#ifdef __ILP32__
+#define tmp1p				%ecx
+#define tmp2p				%esi
+#else
+#define tmp1p				tmp1
+#define tmp2p				tmp2
+#endif
 
 #define xor_E(i) \
-	movq E(i),tmp1; \
+	mov E(i),tmp1p; \
 	movdqa K(i),a1; \
-	movq E(i + 1),tmp2; \
+	mov E(i + 1),tmp2p; \
 	movdqa K(i + 1),a2; \
 	pxor (tmp1),a1; \
 	pxor (tmp2),a2; \
-	movq E(i + 2),tmp1; \
+	mov E(i + 2),tmp1p; \
 	movdqa K(i + 2),a3; \
-	movq E(i + 3),tmp2; \
+	mov E(i + 3),tmp2p; \
 	movdqa K(i + 3),a4; \
 	pxor (tmp1),a3; \
 	pxor (tmp2),a4; \
-	movq E(i + 4),tmp1; \
+	mov E(i + 4),tmp1p; \
 	movdqa K(i + 4),a5; \
-	movq E(i + 5),tmp2; \
+	mov E(i + 5),tmp2p; \
 	movdqa K(i + 5),a6; \
 	pxor (tmp1),a5; \
 	pxor (tmp2),a6
@@ -781,21 +787,21 @@ DO_SPACE(nptr(48))
 	pxor K(k6),a6
 
 #define xor_B_KS_p(b1, k1, b2, k2, b3, k3, b4, k4, b5, k5, b6, k6) \
-	movq k(k1),tmp1; \
-	movq k(k2),tmp2; \
+	mov k(k1),tmp1p; \
+	mov k(k2),tmp2p; \
 	movdqa B(b1),a1; \
 	movdqa B(b2),a2; \
 	pxor (tmp1),a1; \
-	movq k(k3),tmp1; \
+	mov k(k3),tmp1p; \
 	pxor (tmp2),a2; \
-	movq k(k4),tmp2; \
+	mov k(k4),tmp2p; \
 	movdqa B(b3),a3; \
 	movdqa B(b4),a4; \
 	pxor (tmp1),a3; \
-	movq k(k5),tmp1; \
+	mov k(k5),tmp1p; \
 	pxor (tmp2),a4; \
 	movdqa B(b5),a5; \
-	movq k(k6),tmp2; \
+	mov k(k6),tmp2p; \
 	movdqa B(b6),a6; \
 	pxor (tmp1),a5; \
 	pxor (tmp2),a6
@@ -1227,24 +1233,24 @@ DES_bs_finalize_keys_main_loop:
 	leaq DES_bs_all_KS_v(%rip),v_ptr
 	movl $0x60,iterations
 DES_bs_finalize_keys_expand_loop:
-	movq k(0),tmp1
-	movq k(1),tmp2
+	mov k(0),tmp1p
+	mov k(1),tmp2p
 	movdqa (tmp1),%xmm0
 	movdqa (tmp2),%xmm1
-	movq k(2),tmp1
-	movq k(3),tmp2
+	mov k(2),tmp1p
+	mov k(3),tmp2p
 	movdqa %xmm0,V(0)
 	movdqa %xmm1,V(1)
 	movdqa (tmp1),%xmm0
 	movdqa (tmp2),%xmm1
-	movq k(4),tmp1
-	movq k(5),tmp2
+	mov k(4),tmp1p
+	mov k(5),tmp2p
 	movdqa %xmm0,V(2)
 	movdqa %xmm1,V(3)
 	movdqa (tmp1),%xmm0
 	movdqa (tmp2),%xmm1
-	movq k(6),tmp1
-	movq k(7),tmp2
+	mov k(6),tmp1p
+	mov k(7),tmp2p
 	movdqa %xmm0,V(4)
 	movdqa %xmm1,V(5)
 	movdqa (tmp1),%xmm0
