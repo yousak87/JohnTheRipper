@@ -36,6 +36,10 @@
 
 #define LOG_SIZE 1024*16
 
+/* Common OpenCL variables */
+int ocl_gpu_id, platform_id;
+int ocl_device_list[MAXGPUS];
+
 static char opencl_log[LOG_SIZE];
 static int kernel_loaded;
 static size_t program_size;
@@ -63,6 +67,25 @@ static void (*create_clobj)(size_t gws, struct fmt_main * self);
 static void (*release_clobj)(void);
 static const char * config_name;
 static size_t gws_limit;
+
+cl_device_id devices[MAXGPUS];
+cl_context context[MAXGPUS];
+cl_program program[MAXGPUS];
+cl_command_queue queue[MAXGPUS];
+cl_int ret_code;
+cl_kernel crypt_kernel;
+size_t local_work_size;
+size_t global_work_size;
+size_t max_group_size;
+unsigned int opencl_v_width = 1;
+
+char *kernel_source;
+
+cl_event *profilingEvent, *firstEvent, *lastEvent;
+cl_event multi_profilingEvent[MAX_EVENTS];
+
+int device_info[MAXGPUS];
+int cores_per_MP[MAXGPUS];
 
 void opencl_process_event(void)
 {
@@ -468,52 +491,53 @@ void opencl_preinit(void)
 	}
 }
 
-cl_uint opencl_get_vector_width(int sequential_id, int size)
+unsigned int opencl_get_vector_width(int sequential_id, int size)
 {
-	cl_uint v_width;
-
 	/* --force-scalar option, or john.conf ForceScalar boolean */
 	if (options.flags & FLG_SCALAR)
-		return 1;
+		options.v_width = 1;
 
 	/* --force-vector-width=N */
-	if (options.v_width)
-		return options.v_width;
+	if (options.v_width) {
+		opencl_v_width = options.v_width;
+	} else {
+		cl_uint v_width;
 
-	/* OK, we supply the real figure */
-	opencl_preinit();
-	switch(size) {
-	case sizeof(cl_char):
-		HANDLE_CLERROR(clGetDeviceInfo(devices[ocl_gpu_id],
-		                       CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR,
-	                               sizeof(v_width), &v_width, NULL),
-	               "Error asking for char vector width");
-		break;
-	case sizeof(cl_short):
-		HANDLE_CLERROR(clGetDeviceInfo(devices[ocl_gpu_id],
-		                       CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT,
-	                               sizeof(v_width), &v_width, NULL),
-	               "Error asking for long vector width");
-		break;
-	case sizeof(cl_int):
-		HANDLE_CLERROR(clGetDeviceInfo(devices[ocl_gpu_id],
-		                       CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT,
-	                               sizeof(v_width), &v_width, NULL),
-	               "Error asking for int vector width");
-		break;
-	case sizeof(cl_long):
-		HANDLE_CLERROR(clGetDeviceInfo(devices[ocl_gpu_id],
-		                       CL_DEVICE_PREFERRED_VECTOR_WIDTH_LONG,
-	                               sizeof(v_width), &v_width, NULL),
-	               "Error asking for long vector width");
-		break;
-	default:
-		fprintf(stderr, "%s() called with unknown type\n",
-		        __FUNCTION__);
-		error();
+		/* OK, we supply the real figure */
+		opencl_preinit();
+		switch(size) {
+		case sizeof(cl_char):
+			HANDLE_CLERROR(clGetDeviceInfo(devices[ocl_gpu_id],
+			        CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR,
+			        sizeof(v_width), &v_width, NULL),
+			        "Error asking for char vector width");
+			break;
+		case sizeof(cl_short):
+			HANDLE_CLERROR(clGetDeviceInfo(devices[ocl_gpu_id],
+			        CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT,
+			        sizeof(v_width), &v_width, NULL),
+			        "Error asking for long vector width");
+			break;
+		case sizeof(cl_int):
+			HANDLE_CLERROR(clGetDeviceInfo(devices[ocl_gpu_id],
+			        CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT,
+			        sizeof(v_width), &v_width, NULL),
+			        "Error asking for int vector width");
+			break;
+		case sizeof(cl_long):
+			HANDLE_CLERROR(clGetDeviceInfo(devices[ocl_gpu_id],
+			        CL_DEVICE_PREFERRED_VECTOR_WIDTH_LONG,
+			        sizeof(v_width), &v_width, NULL),
+			        "Error asking for long vector width");
+			break;
+		default:
+			fprintf(stderr, "%s() called with unknown type\n",
+			        __FUNCTION__);
+			error();
+		}
+		opencl_v_width = v_width;
 	}
-
-	return v_width;
+	return opencl_v_width;
 }
 
 void opencl_done()
@@ -783,8 +807,10 @@ void opencl_find_best_workgroup_limit(struct fmt_main *self,
 	size_t gws;
 	int count, tidx = 0;
 
-	gws = global_work_size ?
-		global_work_size : self->params.max_keys_per_crypt;
+	/* Formats supporting vectorizing should have a default max keys per
+	   crypt that is a multiple of 2 and of 3 */
+	gws = global_work_size ? global_work_size :
+		self->params.max_keys_per_crypt / opencl_v_width;
 
 	if (get_device_version(sequential_id) < 110) {
 		if (get_device_type(sequential_id) == CL_DEVICE_TYPE_GPU)
@@ -968,7 +994,7 @@ static void release_profiling_events()
 	int i;
 
 	// Release events
-	for (i = 0; i < EVENTS; i++) {
+	for (i = 0; i < MAX_EVENTS; i++) {
 		if (multi_profilingEvent[i])
 			HANDLE_CLERROR(clReleaseEvent(multi_profilingEvent[i]),
 			               "Failed in clReleaseEvent");
@@ -977,19 +1003,20 @@ static void release_profiling_events()
 }
 
 // Do the proper test using different global work sizes.
-static cl_ulong gws_test(size_t num, unsigned int rounds, int sequential_id)
+static cl_ulong gws_test(size_t gws, unsigned int rounds, int sequential_id)
 {
 	cl_ulong startTime, endTime, runtime = 0, looptime = 0;
 	int i, count, tidx = 0;
+	size_t kpc = gws * opencl_v_width;
 
 	// Prepare buffers.
-	create_clobj(num, self);
+	create_clobj(gws, self);
 
 	self->methods.clear_keys();
 
 	// Set keys - all keys from tests will be benchmarked and some
 	// will be permuted to force them unique
-	for (i = 0; i < num; i++) {
+	for (i = 0; i < kpc; i++) {
 		union {
 			char c[PLAINTEXT_BUFFER_SIZE];
 			unsigned int w;
@@ -1009,7 +1036,7 @@ static cl_ulong gws_test(size_t num, unsigned int rounds, int sequential_id)
 		self->methods.salt(self->params.tests[0].ciphertext));
 
 	// Timing run
-	count = num;
+	count = kpc;
 	if (self->methods.crypt_all(&count, NULL) < 0) {
 		runtime = looptime = 0;
 
@@ -1042,7 +1069,7 @@ static cl_ulong gws_test(size_t num, unsigned int rounds, int sequential_id)
 		else
 			runtime += (endTime - startTime);
 
-		if (options.verbosity > 3)
+		if (options.verbosity > 4)
 			fprintf(stderr, "%s%.2f ms", warnings[i],
 			        (double)(endTime - startTime) / 1000000.);
 
@@ -1056,7 +1083,7 @@ static cl_ulong gws_test(size_t num, unsigned int rounds, int sequential_id)
 			break;
 		}
 	}
-	if (options.verbosity > 3)
+	if (options.verbosity > 4)
 		fprintf(stderr, "\n");
 
 	if (split_events)
@@ -1077,7 +1104,7 @@ void opencl_init_auto_setup(
 	int i;
 
 	// Initialize events
-	for (i = 0; i < EVENTS; i++)
+	for (i = 0; i < MAX_EVENTS; i++)
 		multi_profilingEvent[i] = NULL;
 
 	// Get parameters
@@ -1116,8 +1143,10 @@ void opencl_find_best_lws(
 	if (options.verbosity > 3)
 		fprintf(stderr, "Max local worksize %zd, ", group_size_limit);
 
-	gws = global_work_size ?
-		global_work_size : self->params.max_keys_per_crypt;
+	/* Formats supporting vectorizing should have a default max keys per
+	   crypt that is a multiple of 2 and of 3 */
+	gws = global_work_size ? global_work_size :
+		self->params.max_keys_per_crypt / opencl_v_width;
 
 	if (get_device_version(sequential_id) < 110) {
 		if (get_device_type(sequential_id) == CL_DEVICE_TYPE_GPU)
@@ -1177,7 +1206,7 @@ void opencl_find_best_lws(
 
 	// Warm-up run
 	local_work_size = wg_multiple;
-	count = global_work_size;
+	count = global_work_size * opencl_v_width;
 	self->methods.crypt_all(&count, NULL);
 
 	// Activate events
@@ -1278,9 +1307,8 @@ void opencl_find_best_lws(
 	}
 }
 
-void opencl_find_best_gws(int step, int show_speed,
-	unsigned long long int max_run_time, int sequential_id,
-	unsigned int rounds)
+void opencl_find_best_gws(int step, unsigned long long int max_run_time,
+                          int sequential_id, unsigned int rounds)
 {
 	size_t num = 0;
 	int optimal_gws = local_work_size;
@@ -1293,10 +1321,10 @@ void opencl_find_best_gws(int step, int show_speed,
 
 	if (options.verbosity > 3)
 		fprintf(stderr, "Calculating best global worksize (GWS); "
-			"max. %2.1f s duration.\n\n",
+			"max. %2.1f s duration.\n",
 			(float) max_run_time / 1000000000.);
 
-	if (show_speed)
+	if (options.verbosity > 4)
 		fprintf(stderr, "Raw speed figures including buffer "
 		        "transfers:\n");
 
@@ -1318,8 +1346,7 @@ void opencl_find_best_gws(int step, int show_speed,
 		if ((gws_limit && (num > gws_limit)) || ((gws_limit == 0) &&
 		    (buffer_size * num * 1.2 >
 		     get_max_mem_alloc_size(ocl_gpu_id)))) {
-
-			if (options.verbosity > 3)
+			if (options.verbosity > 4)
 				fprintf(stderr, "Hardware resources "
 				        "fullfilled\n");
 			break;
@@ -1329,7 +1356,7 @@ void opencl_find_best_gws(int step, int show_speed,
 		                          sequential_id)))
 			break;
 
-		if (!show_speed && options.verbosity < 4)
+		if (options.verbosity < 4)
 			advance_cursor();
 
 		speed = rounds * num / (run_time / 1000000000.);
@@ -1337,8 +1364,7 @@ void opencl_find_best_gws(int step, int show_speed,
 		if (run_time < min_time)
 			min_time = run_time;
 
-		if (show_speed) {
-
+		if (options.verbosity > 3) {
 			if (rounds > 1)
 				fprintf(stderr, "gws: %9zu\t%10llu c/s%12u "
 				        "rounds/s%8.3f sec per crypt_all()",
@@ -1354,19 +1380,18 @@ void opencl_find_best_gws(int step, int show_speed,
 		}
 
 		if (run_time > max_run_time) {
-
-			if (show_speed)
+			if (options.verbosity > 3)
 				fprintf(stderr, " - too slow\n");
 			break;
 		}
 
 		if (speed > (1.01 * best_speed)) {
-			if (show_speed)
+			if (options.verbosity > 3)
 				fprintf(stderr, "+");
 			best_speed = speed;
 			optimal_gws = num;
 		}
-		if (show_speed)
+		if (options.verbosity > 3)
 			fprintf(stderr, "\n");
 	}
 	// Release profiling queue and create new with profiling disabled

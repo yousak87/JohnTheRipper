@@ -34,6 +34,7 @@
 
 #define MAXGPUS	8
 #define MAX_PLATFORMS	8
+#define MAX_EVENTS 8
 #define SUBSECTION_OPENCL	":OpenCL"
 #define MAX_OCLINFO_STRING_LEN	2048
 
@@ -53,40 +54,40 @@ static inline cl_mem john_clCreateBuffer (int l, char *f,
 	                    __FILE__, a, b, c, d, e)
 #endif
 
-/* Common OpenCL variables */
-int ocl_gpu_id, platform_id;
-int ocl_device_list[MAXGPUS];
-
 typedef struct {
 	cl_platform_id			platform;
 	int				num_devices;
 } cl_platform;
 cl_platform platforms[MAX_PLATFORMS];
 
-cl_device_id devices[MAXGPUS];
-cl_context context[MAXGPUS];
-cl_program program[MAXGPUS];
-cl_command_queue queue[MAXGPUS];
-cl_int ret_code;
-cl_kernel crypt_kernel;
-size_t local_work_size;
-size_t global_work_size;
-size_t max_group_size;
+/* Common OpenCL variables */
+extern int ocl_gpu_id, platform_id;
+extern int ocl_device_list[MAXGPUS];
 
-char *kernel_source;
-void opencl_read_source(char *kernel_filename);
+extern cl_device_id devices[MAXGPUS];
+extern cl_context context[MAXGPUS];
+extern cl_program program[MAXGPUS];
+extern cl_command_queue queue[MAXGPUS];
+extern cl_int ret_code;
+extern cl_kernel crypt_kernel;
+extern size_t local_work_size;
+extern size_t global_work_size;
+extern size_t max_group_size;
+extern unsigned int opencl_v_width;
+extern char *kernel_source;
 
-#define EVENTS 8
-cl_event *profilingEvent, *firstEvent, *lastEvent;
-cl_event multi_profilingEvent[EVENTS];
+extern cl_event *profilingEvent, *firstEvent, *lastEvent;
+extern cl_event multi_profilingEvent[MAX_EVENTS];
+
+extern int device_info[MAXGPUS];
+extern int cores_per_MP[MAXGPUS];
 
 #define LWS_CONFIG_NAME			"_LWS"
 #define GWS_CONFIG_NAME			"_GWS"
 #define DUR_CONFIG_NAME			"_MaxDuration"
 #define FALSE				0
 
-int device_info[MAXGPUS];
-int cores_per_MP[MAXGPUS];
+void opencl_read_source(char *kernel_filename);
 
 /* Passive init: enumerate platforms and devices and parse options */
 void opencl_preinit(void);
@@ -99,7 +100,7 @@ void opencl_done(void);
  * or --force-vector-width=N options and the ForceScalar config option may
  * affect the return value.
  */
-cl_uint opencl_get_vector_width(int sequential_id, int size);
+unsigned int opencl_get_vector_width(int sequential_id, int size);
 
 /* Returns number of selected devices */
 int opencl_get_devices(void);
@@ -113,13 +114,17 @@ int opencl_prepare_dev(int sequential_id);
 void opencl_init(char *kernel_filename, int sequential_id, char *options);
 
 /* used by opencl_DES_bs_b.c */
-void opencl_build(int sequential_id, char *opts, int save, char * file_name, int showLog);
+void opencl_build(int sequential_id, char *opts, int save,
+                  char *file_name, int showLog);
 
 /* Build kernel (if not cached), and cache it */
-void opencl_build_kernel(char *kernel_filename, int sequential_id, char *options, int warn);
+void opencl_build_kernel(char *kernel_filename, int sequential_id,
+                         char *options, int warn);
 
 void opencl_find_best_workgroup(struct fmt_main *self);
-void opencl_find_best_workgroup_limit(struct fmt_main *self, size_t group_size_limit, int sequential_id, cl_kernel crypt_kernel);
+void opencl_find_best_workgroup_limit(
+	struct fmt_main *self, size_t group_size_limit, int sequential_id,
+	cl_kernel crypt_kernel);
 
 cl_device_type get_device_type(int sequential_id);
 cl_ulong get_local_memory_size(int sequential_id);
@@ -167,7 +172,7 @@ void opencl_process_event(void);
 	}
 
 /* Macro for get a multiple of a given value */
-#define GET_MULTIPLE(dividend, divisor)		((local_work_size) ? ((dividend / divisor) * divisor) : (dividend))
+#define GET_MULTIPLE(dividend, divisor)		((divisor) ? ((dividend / divisor) * divisor) : (dividend))
 
 /*
  * Shared function to find 'the best' local work group size.
@@ -177,8 +182,8 @@ void opencl_process_event(void);
  * - sequential_id: the sequential number of the device in use.
  * - Your kernel (or main kernel) should be crypt_kernel.
  */
-void opencl_find_best_lws(
-	size_t group_size_limit, int sequential_id, cl_kernel crypt_kernel);
+void opencl_find_best_lws(size_t group_size_limit, int sequential_id,
+                          cl_kernel crypt_kernel);
 
 /*
  * Shared function to find 'the best' global work group size (keys per crypt).
@@ -195,9 +200,8 @@ void opencl_find_best_lws(
  * - rounds: the number of rounds used by the algorithm.
  *   For raw formats it should be 1. For sha512crypt it is 5000.
  */
-void opencl_find_best_gws(int step, int show_speed,
-	unsigned long long int max_run_time, int sequential_id,
-	unsigned int rounds);
+void opencl_find_best_gws(int step, unsigned long long int max_run_time,
+                          int sequential_id, unsigned int rounds);
 
 /*
  * Shared function to initialize variables necessary by shared find(lws/gws) functions.
