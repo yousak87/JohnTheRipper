@@ -96,6 +96,9 @@ void fmt_done(struct fmt_main *format)
 		format->methods.done();
 		MEM_FREE(format->private.msk_ctx);
 		format->private.initialized = 0;
+#ifdef HAVE_OPENCL
+		opencl_done();
+#endif
 	}
 }
 
