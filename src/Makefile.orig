@@ -181,7 +181,7 @@ JOHN_OBJS = \
 	unshadow.o \
 	unafs.o \
 	undrop.o \
-	regex.o \
+	regex.o fmt_alias.o \
 	unique.o putty2john.o gpg2john.o memdbg.o
 
 OCL_OBJS = \

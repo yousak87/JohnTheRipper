@@ -157,6 +157,7 @@ const char *dynamic_Find_Function_Name(DYNAMIC_primitive_funcp p);
 // Function used to 'link' a thin format into dynamic.  See PHPS_fmt.c for an example.
 struct fmt_main *dynamic_THIN_FORMAT_LINK(struct fmt_main *pFmt, char *ciphertext, char *orig_sig, int bInitAlso);
 int text_in_dynamic_format_already(struct fmt_main *pFmt, char *ciphertext);
+int dyna_get_number(struct fmt_main *pFmt);
 
 int dynamic_Register_formats(struct fmt_main **ptr);
 

@@ -20,7 +20,7 @@
  * in case of any problem with the new additions
  * (tunable cost parameters)
  */
-#define FMT_MAIN_VERSION 12	/* change if structure fmt_main changes */
+#define FMT_MAIN_VERSION 13	/* change if structure fmt_main changes */
 
 /*
  * fmt_main is declared for real further down this file, but we refer to it in
@@ -309,17 +309,23 @@ struct fmt_main {
 	struct fmt_methods methods;
 	struct fmt_private private;
 	struct fmt_main *next;
+	struct fmt_main *alias_next;
 };
 
 /*
  * Linked list of registered formats.
  */
 extern struct fmt_main *fmt_list;
+/*
+ * Linked list of registered formats for the alias code. ALL formats are put here.
+ */
+extern struct fmt_main *fmt_alias_list;
 
 /*
  * Format registration function.
  */
 extern void fmt_register(struct fmt_main *format);
+extern void fmt_alias_register(struct fmt_main *format);
 
 /*
  * Initializes the format's internal structures unless already initialized.

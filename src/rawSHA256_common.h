@@ -60,11 +60,16 @@ static int valid(char *ciphertext, struct fmt_main *self)
 }
 
 /* Convert Cisco hashes to hex ones, so .pot entries are compatible */
+/* also converts dyna_60 into $sha256$ */
 static char *prepare(char *split_fields[10], struct fmt_main *self)
 {
 	static char out[HEX_TAG_LEN + HEX_CIPHERTEXT_LENGTH + 1];
 	char *o, *p = split_fields[1];
 
+	if (!strncmp(p, "$dynamic_60$", 12) && strlen(p)== 12 + HEX_CIPHERTEXT_LENGTH) {
+		sprintf(out, "%s%s", HEX_TAG, &p[12]);
+		return out;
+	}
 	if (!valid_cisco(p))
 		return p;
 

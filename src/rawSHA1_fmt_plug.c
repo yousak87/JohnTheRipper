@@ -47,11 +47,11 @@
 #define BENCHMARK_COMMENT		""
 #define BENCHMARK_LENGTH		-1
 
-#define FORMAT_TAG				"$dynamic_26$"
-#define TAG_LENGTH				12
+#define FORMAT_TAG				"$SHA1$"
+#define TAG_LENGTH				(sizeof(FORMAT_TAG) - 1)
 
 #define HASH_LENGTH				40
-#define CIPHERTEXT_LENGTH		(HASH_LENGTH + TAG_LENGTH)
+#define CIPHERTEXT_LENGTH		HASH_LENGTH
 
 #define DIGEST_SIZE				20
 #define BINARY_SIZE				20 // source()
@@ -129,19 +129,29 @@ static int valid(char *ciphertext, struct fmt_main *self)
 
 static char *split(char *ciphertext, int index, struct fmt_main *self)
 {
-	static char out[CIPHERTEXT_LENGTH + 1];
+	static char out[TAG_LENGTH + CIPHERTEXT_LENGTH + 1];
 
 	if (!strncmp(ciphertext, FORMAT_TAG, TAG_LENGTH))
 		ciphertext += TAG_LENGTH;
 
 	strncpy(out, FORMAT_TAG, sizeof(out));
 
-	memcpy(&out[TAG_LENGTH], ciphertext, HASH_LENGTH);
-	out[CIPHERTEXT_LENGTH] = 0;
-
+	memcpy(&out[TAG_LENGTH], ciphertext, CIPHERTEXT_LENGTH+1);
 	strlwr(&out[TAG_LENGTH]);
 
 	return out;
+}
+
+static char *prepare(char *split_fields[10], struct fmt_main *self)
+{
+	static char out[TAG_LENGTH + CIPHERTEXT_LENGTH + 1];
+
+	if (split_fields[1][0] == '$' && !strncmp(split_fields[1], "$dynamic_26$", 12) && strlen(split_fields[1]) == 12+CIPHERTEXT_LENGTH) {
+		sprintf(out, "%s%s", FORMAT_TAG, &split_fields[1][12]);
+		if (valid(out,self))
+			return out;
+	}
+	return split_fields[1];
 }
 
 #ifdef MMX_COEF
@@ -307,7 +317,7 @@ static int cmp_exact(char *source, int index)
 
 static char *source(char *source, void *binary)
 {
-	static char Buf[CIPHERTEXT_LENGTH + 1];
+	static char Buf[TAG_LENGTH + CIPHERTEXT_LENGTH + 1];
 	unsigned char realcipher[BINARY_SIZE];
 	unsigned char *cpi;
 	char *cpo;
@@ -354,7 +364,7 @@ struct fmt_main fmt_rawSHA1 = {
 		init,
 		fmt_default_done,
 		fmt_default_reset,
-		fmt_default_prepare,
+		prepare,
 		valid,
 		split,
 		binary,

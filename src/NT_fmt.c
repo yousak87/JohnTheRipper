@@ -330,6 +330,11 @@ static char *prepare(char *split_fields[10], struct fmt_main *self)
 			if (valid(out,self))
 				return out;
 		}
+		if (split_fields[1][0] == '$' && !strncmp(split_fields[1], "$dynamic_33$", 12)) {
+			sprintf(out, "$NT$%*.*s", 32,32,&split_fields[1][12]);
+			if (valid(out,self))
+				return out;
+		}
 	}
 	return split_fields[1];
 }

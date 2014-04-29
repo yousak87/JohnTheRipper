@@ -57,7 +57,7 @@
 #define SALT_SIZE				0
 #define SALT_ALIGN				1
 
-#define FORMAT_TAG				"$dynamic_0$"
+#define FORMAT_TAG				"$MD5$"
 #define TAG_LENGTH				(sizeof(FORMAT_TAG) - 1)
 
 static struct fmt_tests tests[] = {
@@ -132,6 +132,7 @@ static char *split(char *ciphertext, int index, struct fmt_main *self)
 
 	memcpy(out, FORMAT_TAG, TAG_LENGTH);
 	memcpy(out + TAG_LENGTH, ciphertext, CIPHERTEXT_LENGTH + 1);
+	strlwr(&out[TAG_LENGTH]);
 	return out;
 }
 
@@ -340,7 +341,7 @@ struct fmt_main fmt_rawMD5 = {
 		SALT_ALIGN,
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
-		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_OMP_BAD,
+		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_OMP_BAD | FMT_SPLIT_UNIFIES_CASE,
 #if FMT_MAIN_VERSION > 11
 		{ NULL },
 #endif

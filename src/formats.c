@@ -32,6 +32,8 @@ typedef unsigned int ARCH_WORD_32;
 
 struct fmt_main *fmt_list = NULL;
 static struct fmt_main **fmt_tail = &fmt_list;
+struct fmt_main *fmt_alias_list = NULL;
+static struct fmt_main **fmt_alias_tail = &fmt_alias_list;
 
 extern volatile int bench_running;
 
@@ -45,10 +47,16 @@ static size_t fmt_strnlen(const char *s, size_t max) {
 }
 #endif
 
+void fmt_alias_register(struct fmt_main *format) {
+	format->private.initialized = 0;
+	format->alias_next = NULL;
+	format->next = NULL;
+	*fmt_alias_tail = format;
+	fmt_alias_tail = &format->alias_next;
+}
+
 void fmt_register(struct fmt_main *format)
 {
-	format->private.initialized = 0;
-	format->next = NULL;
 	*fmt_tail = format;
 	fmt_tail = &format->next;
 }
@@ -471,7 +479,6 @@ static char *fmt_self_test_body(struct fmt_main *format,
 
 	format->methods.clear_keys();
 	format->private.initialized = 2;
-
 	MemDbg_Validate_msg(MEMDBG_VALIDATE_DEEPEST, "At end of self-test:");
 
 	return NULL;

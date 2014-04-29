@@ -130,6 +130,7 @@ static DYNAMIC_primitive_funcp _Funcs_1[] =
 #include "pkzip.h"
 #include "aligned.h"
 #include "fake_salts.h"
+#include "fmt_alias.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -384,6 +385,16 @@ char *RemoveHEX(char *output, char *input) {
 	return output;
 }
 
+int dyna_get_number(struct fmt_main *pFmt) {
+	private_subformat_data *pPriv = pFmt->private.data;
+	int nFmtNum;
+	if (!pPriv)
+		return -1;
+	nFmtNum = -1;
+	sscanf(pPriv->dynamic_WHICH_TYPE_SIG, "$dynamic_%d$", &nFmtNum);
+	return nFmtNum;
+}
+
 /*********************************************************************************
  * Detects a 'valid' md5-gen format. This function is NOT locked to anything. It
  * takes it's detection logic from the provided fmt_main pointer. Within there,
@@ -395,14 +406,28 @@ char *RemoveHEX(char *output, char *input) {
 static int valid(char *ciphertext, struct fmt_main *pFmt)
 {
 	int i, cipherTextLen;
+	int siglen, salt_offset;
 	char *cp, fixed_ciphertext[1024];
 	private_subformat_data *pPriv = pFmt->private.data;
 
 	if (!pPriv)
 		return 0;
 
-	if (strncmp(ciphertext, pPriv->dynamic_WHICH_TYPE_SIG, strlen(pPriv->dynamic_WHICH_TYPE_SIG)))
-		return 0;
+	siglen = strlen(pPriv->dynamic_WHICH_TYPE_SIG);
+	salt_offset = pPriv->dynamic_SALT_OFFSET;
+	if (strncmp(ciphertext, pPriv->dynamic_WHICH_TYPE_SIG, siglen)) {
+		if (!strncmp(ciphertext, "$dynamic_", 9) && dynamics_equal(pPriv->dynamic_WHICH_TYPE_SIG, ciphertext)) {
+			int new_len, len_diff;
+			cp = &ciphertext[9];
+			while (*cp && *cp != '$')
+				++cp;
+			new_len = (cp-ciphertext) + 1;
+			len_diff = new_len - siglen;
+			siglen = new_len;
+			salt_offset += len_diff;
+		} else
+			return 0;
+	}
 
 	// this is now simply REMOVED totally, if we detect it.  Doing this solves MANY other problems
 	// of leaving it in there. The ONLY problem we still have is NULL bytes.
@@ -411,7 +436,7 @@ static int valid(char *ciphertext, struct fmt_main *pFmt)
 			ciphertext = RemoveHEX(fixed_ciphertext, ciphertext);
 	}
 
-	cp = &ciphertext[strlen(pPriv->dynamic_WHICH_TYPE_SIG)];
+	cp = &ciphertext[siglen];
 
 	if (pPriv->dynamic_base64_inout == 1)
 	{
@@ -503,33 +528,33 @@ static int valid(char *ciphertext, struct fmt_main *pFmt)
 	if (strlen(&cp[cipherTextLen]) > SALT_SIZE)
 		return 0;
 // end NOTE.
-	if (pPriv->dynamic_FIXED_SALT_SIZE && ciphertext[pPriv->dynamic_SALT_OFFSET-1] != '$')
+	if (pPriv->dynamic_FIXED_SALT_SIZE && ciphertext[salt_offset-1] != '$')
 		return 0;
-	if (pPriv->dynamic_FIXED_SALT_SIZE > 0 && strlen(&ciphertext[pPriv->dynamic_SALT_OFFSET]) != pPriv->dynamic_FIXED_SALT_SIZE) {
+	if (pPriv->dynamic_FIXED_SALT_SIZE > 0 && strlen(&ciphertext[salt_offset]) != pPriv->dynamic_FIXED_SALT_SIZE) {
 		// check if there is a 'salt-2' or 'username', etc  If that is the case, then this is still valid.
-		if (strncmp(&ciphertext[pPriv->dynamic_SALT_OFFSET+pPriv->dynamic_FIXED_SALT_SIZE], "$$", 2))
+		if (strncmp(&ciphertext[salt_offset+pPriv->dynamic_FIXED_SALT_SIZE], "$$", 2))
 			return 0;
 	}
-	else if (pPriv->dynamic_FIXED_SALT_SIZE < -1 && strlen(&ciphertext[pPriv->dynamic_SALT_OFFSET]) > -(pPriv->dynamic_FIXED_SALT_SIZE)) {
+	else if (pPriv->dynamic_FIXED_SALT_SIZE < -1 && strlen(&ciphertext[salt_offset]) > -(pPriv->dynamic_FIXED_SALT_SIZE)) {
 		// check if there is a 'salt-2' or 'username', etc  If that is the case, then this is still 'valid'
 		char *cpX = mem_alloc(-(pPriv->dynamic_FIXED_SALT_SIZE) + 3);
-		strnzcpy(cpX, &ciphertext[pPriv->dynamic_SALT_OFFSET], -(pPriv->dynamic_FIXED_SALT_SIZE) + 3);
+		strnzcpy(cpX, &ciphertext[salt_offset], -(pPriv->dynamic_FIXED_SALT_SIZE) + 3);
 		if (!strstr(cpX, "$$")) {
 			MEM_FREE(cpX);
 			return 0;
 		}
 		MEM_FREE(cpX);
 	}
-	if (pPriv->b2Salts==1 && !strstr(&ciphertext[pPriv->dynamic_SALT_OFFSET-1], "$$2"))
+	if (pPriv->b2Salts==1 && !strstr(&ciphertext[salt_offset-1], "$$2"))
 		return 0;
-	if (pPriv->nUserName && !strstr(&ciphertext[pPriv->dynamic_SALT_OFFSET-1], "$$U"))
+	if (pPriv->nUserName && !strstr(&ciphertext[salt_offset-1], "$$U"))
 		return 0;
 	if (pPriv->FldMask) {
 		for (i = 0; i < 10; ++i) {
 			if ((pPriv->FldMask & (MGF_FLDx_BIT<<i)) == (MGF_FLDx_BIT<<i)) {
 				char Fld[5];
 				sprintf(Fld, "$$F%d", i);
-				if (!strstr(&ciphertext[pPriv->dynamic_SALT_OFFSET-1], Fld))
+				if (!strstr(&ciphertext[salt_offset-1], Fld))
 					return 0;
 			}
 		}
@@ -559,6 +584,7 @@ static int valid(char *ciphertext, struct fmt_main *pFmt)
 static char *FixupIfNeeded(char *ciphertext, private_subformat_data *pPriv);
 static struct fmt_main *dynamic_Get_fmt_main(int which);
 static char *HandleCase(char *cp, int caseType);
+static char *Handle_aliases(char *cpBuilding);
 
 // 'wrapper' functions. These are here, so we can call these functions to work on ALL data (not simply within the
 // thead, which ONLY wants to work on a subset of the data.  These functions should NOT be called by threading
@@ -910,6 +936,12 @@ static char *prepare(char *split_fields[10], struct fmt_main *pFmt)
 			return split_fields[1];
 	}
 
+	// this is a non-normal alias. We can not use alias code, but CAN link them through conversion
+	if (strncmp(cpBuilding, "$dynamic_", 9)) {
+		char *chk;
+		if ((chk = Handle_aliases(cpBuilding)) != NULL)
+			return chk;
+	}
 	// handle 'older' md5_gen(x) signature, by simply converting to $dynamic_x$ signature
 	// Thus older md5_gen() is a valid input (or from john.pot), but ONLY the newer
 	// $dynamic_x$ will be written out (into .pot, output lines, etc).
@@ -7411,17 +7443,19 @@ int dynamic_Register_formats(struct fmt_main **ptr)
 		m_allow_rawhash_fixup = 1;
 	else if (options.dynamic_bare_hashes_always_valid != 'N'  && cfg_get_bool(SECTION_OPTIONS, NULL, "DynamicAlwaysUseBareHashes", 1))
 		m_allow_rawhash_fixup = 1;
-
 	if (single != -1) {
 		// user wanted only a 'specific' format.  Simply load that one.
 		m_allow_rawhash_fixup = 1;
 		if (dynamic_IS_VALID(single) == 0)
 			return 0;
+		// code below cut out (but left for history, to make alias work.  In alias code, we MUST load all formats, to get full list of format records in the alias list.
+		/*
 		pFmts = mem_alloc_tiny(sizeof(pFmts[0]), MEM_ALIGN_WORD);
 		if (!LoadOneFormat(single, pFmts))
 			return 0;
 		*ptr = pFmts;
 		return (nFmts = 1);
+		*/
 	}
 
 	for (count = i = 0; i < 5000; ++i) {
@@ -7562,11 +7596,43 @@ struct fmt_main *dynamic_THIN_FORMAT_LINK(struct fmt_main *pFmt, char *ciphertex
 	return pFmtLocal;
 }
 
+// We ONLY deal with hex hashes at this time.  Is we later have to deal with
+// base-64, this will become harder.  Before this function we had bugs where
+// many things were loaded as 'being' valid, even if not.
+static int looks_like_raw_hash(char *ciphertext, private_subformat_data *pPriv) {
+	int i, cipherTextLen = CIPHERTEXT_LENGTH;
+	if (pPriv->dynamic_40_byte_input) {
+		cipherTextLen = 40;
+	} else if (pPriv->dynamic_48_byte_input) {
+		cipherTextLen = 48;
+	} else if (pPriv->dynamic_64_byte_input) {
+		cipherTextLen = 64;
+	} else if (pPriv->dynamic_56_byte_input) {
+		cipherTextLen = 56;
+	} else if (pPriv->dynamic_80_byte_input) {
+		cipherTextLen = 80;
+	} else if (pPriv->dynamic_96_byte_input) {
+		cipherTextLen = 96;
+	} else if (pPriv->dynamic_128_byte_input) {
+		cipherTextLen = 128;
+	}
+	for (i = 0; i < cipherTextLen; i++) {
+		if (atoi16[ARCH_INDEX(ciphertext[i])] == 0x7f)
+			return 0;
+	}
+	if ((pPriv->pSetup->flags&MGF_SALTED) == 0) {
+		if (!ciphertext[cipherTextLen])
+			return 1;
+		return 0;
+	}
+	return ciphertext[cipherTextLen] == '$';
+}
+
 static char *FixupIfNeeded(char *ciphertext, private_subformat_data *pPriv)
 {
 	if (!ciphertext || *ciphertext == 0 || *ciphertext == '*')
 		return ciphertext;
-	if (m_allow_rawhash_fixup && strncmp(ciphertext, "$dynamic_", 9))
+	if (m_allow_rawhash_fixup && strncmp(ciphertext, "$dynamic_", 9) && looks_like_raw_hash(ciphertext, pPriv))
 	{
 		static char __ciphertext[512+24];
 		if (pPriv->pSetup->flags & MGF_SALTED) {
@@ -7599,6 +7665,44 @@ static char *FixupIfNeeded(char *ciphertext, private_subformat_data *pPriv)
 	return ciphertext;
 }
 
+static char *Handle_aliases(char *cpBuilding) {
+	static char ct[512];
+	if (!strncmp(cpBuilding, "$IPB2$", 6) && cpBuilding[16] == '$') {
+		char *cp = &cpBuilding[6], cpChar[3], *cpo = &ct[sprintf(ct, "$dynamic_12$%32.32s$", &cpBuilding[17])];
+		int i;
+		cpChar[2] = 0;
+		for (i = 0; i < 5; ++i) {
+			*cpo++ = (atoi16[ARCH_INDEX(cp[0])] << 4) + atoi16[ARCH_INDEX(cp[1])];
+			cp += 2;
+		}
+		*cpo = 0;
+		return ct;
+	}
+	if (!strncmp(cpBuilding, "$SHA", 4)) {
+		if (!strncmp(&cpBuilding[4], "1$", 2)) {
+			sprintf(ct, "$dynamic_26$%s", &cpBuilding[6]);
+			return ct;
+		}
+		if (!strncmp(&cpBuilding[4], "224$", 4)) {
+			sprintf(ct, "$dynamic_50$%s", &cpBuilding[8]);
+			return ct;
+		}
+		if (!strncmp(&cpBuilding[4], "256$", 4)) {
+			sprintf(ct, "$dynamic_60$%s", &cpBuilding[8]);
+			return ct;
+		}
+		if (!strncmp(&cpBuilding[4], "384$", 4)) {
+			sprintf(ct, "$dynamic_70$%s", &cpBuilding[8]);
+			return ct;
+		}
+		if (!strncmp(&cpBuilding[4], "512$", 4)) {
+			sprintf(ct, "$dynamic_80$%s", &cpBuilding[8]);
+			return ct;
+		}
+	}
+	return NULL;
+}
+
 int text_in_dynamic_format_already(struct fmt_main *pFmt, char *ciphertext)
 {
 	private_subformat_data *pPriv;
@@ -7608,7 +7712,12 @@ int text_in_dynamic_format_already(struct fmt_main *pFmt, char *ciphertext)
 	  properly (in valid, etc).  So, we simply grab the static private stuff each time */
 	pPriv = pFmt->private.data;
 	if (!ciphertext || !pPriv || !pPriv->dynamic_WHICH_TYPE_SIG) return 0;
-	return !strncmp(ciphertext, pPriv->dynamic_WHICH_TYPE_SIG, strlen(pPriv->dynamic_WHICH_TYPE_SIG));
+	//return !strncmp(ciphertext, pPriv->dynamic_WHICH_TYPE_SIG, strlen(pPriv->dynamic_WHICH_TYPE_SIG));
+	if (!strncmp(ciphertext, pPriv->dynamic_WHICH_TYPE_SIG, strlen(pPriv->dynamic_WHICH_TYPE_SIG)))
+		return 1;
+	if (dynamics_equal(pPriv->dynamic_WHICH_TYPE_SIG, ciphertext))
+		return 1;
+	return 0;
 }
 
 // if caseType == 1, return cp

@@ -178,6 +178,31 @@ static int valid(char *ciphertext, struct fmt_main *self)
 	return 1;
 }
 
+static char *to_hexsalt(char *cp) {
+	static char buf[11];
+	int i;
+	for (i = 0; i < 5; ++i) {
+		buf[(i<<1)] = itoa16[(int)(cp[i]>>4)];
+		buf[(i<<1)+1] = itoa16[(int)(cp[i]&0xF)];
+	}
+	buf[10] = 0;
+	return buf;
+}
+
+static char *prepare(char *split_fields[10], struct fmt_main *self)
+{
+	static char out[256];
+
+	if (!valid(split_fields[1], self)) {
+		if (split_fields[1][0] == '$' && !strncmp(split_fields[1], "$dynamic_12$", 12) && strlen(split_fields[1]) == 50) {
+			sprintf(out, "$IPB2$%s$%32.32s", to_hexsalt(&split_fields[1][32+12+1]), &split_fields[1][12]);
+			if (valid(out,self))
+				return out;
+		}
+	}
+	return split_fields[1];
+}
+
 static void *binary(char *ciphertext)
 {
 	static unsigned char binary_cipher[BINARY_SIZE];
@@ -481,7 +506,7 @@ struct fmt_main fmt_IPB2 = {
 		init,
 		fmt_default_done,
 		fmt_default_reset,
-		fmt_default_prepare,
+		prepare,
 		valid,
 		fmt_default_split,
 		binary,

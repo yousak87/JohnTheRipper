@@ -40,6 +40,7 @@
 #include "logger.h" /* Beware: log_init() happens after most functions here */
 #include "jumbo.h"
 #include "memdbg.h"
+#include "fmt_alias.h"
 
 #ifdef HAVE_CRYPT
 extern struct fmt_main fmt_crypt;
@@ -443,6 +444,18 @@ static int ldr_split_line(char **login, char **ciphertext,
 			return valid;
 		}
 
+		/* check to see if this is a 'valid' alias format for what we are checking */
+		alt = fmt_alias_check(*format, *ciphertext, fields);
+		if (alt) {
+			prepared = alt->methods.prepare(fields, alt);
+			if (prepared)
+				valid = alt->methods.valid(prepared, alt);
+			if (valid) {
+				*ciphertext = prepared;
+				return valid;
+			}
+		}
+
 		ldr_set_encoding(*format);
 
 		alt = fmt_list;
@@ -518,8 +531,21 @@ static int ldr_split_line(char **login, char **ciphertext,
 		if (!prepared)
 			continue;
 		valid = alt->methods.valid(prepared, alt);
-		if (!valid)
-			continue;
+		if (!valid) {
+			/* we must keep alt what it was, SINCE we have not initialzed *format yet, and need to init it WITH alt */
+			/* we are just looking for another format that CAN process this string, that is an alias */
+			struct fmt_main *alt2;
+			alt2 = fmt_alias_check(alt, *ciphertext, fields);
+			if (alt2) {
+				prepared = alt2->methods.prepare(fields, alt2);
+				if (prepared)
+					valid = alt2->methods.valid(prepared, alt2);
+				if (!valid) {
+					continue;
+				}
+			} else
+				continue;
+		}
 
 		if (retval < 0) {
 			retval = valid;
@@ -538,14 +564,19 @@ static int ldr_split_line(char **login, char **ciphertext,
 			break;
 		}
 #ifdef LDR_WARN_AMBIGUOUS
-		if (john_main_process)
-		fprintf(stderr,
-		    "Warning: detected hash type \"%s\", but the string is "
-		    "also recognized as \"%s\"\n"
-		    "Use the \"--format=%s\" option to force loading these "
-		    "as that type instead\n",
-		    (*format)->params.label, alt->params.label,
-		    alt->params.label);
+		if (john_main_process) {
+			/* check to see if these formats are aliases.
+			   If so, do not warn, they actually ARE handled now */
+			if (alt != *format && alt != fmt_alias_check(*format, *ciphertext, fields)) {
+				fprintf(stderr,
+					"Warning: detected hash type \"%s\", but the string is "
+					"also recognized as \"%s\"\n"
+					"Use the \"--format=%s\" option to force loading these "
+					"as that type instead\n",
+					(*format)->params.label, alt->params.label,
+					alt->params.label);
+			}
+		}
 #endif
 	} while ((alt = alt->next));
 
@@ -606,7 +637,7 @@ static struct list_main *ldr_init_words(char *login, char *gecos, char *home)
 static void ldr_load_pw_line(struct db_main *db, char *line)
 {
 	static int skip_dupe_checking = 0;
-	struct fmt_main *format;
+	struct fmt_main *format, *alt;
 	int index, count;
 	char *login, *ciphertext, *gecos, *home;
 	char *piece;
@@ -655,6 +686,18 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 	}
 
 	for (index = 0; index < count; index++) {
+		int valid;
+		valid = format->methods.valid(ciphertext, format);
+		if (!valid) {
+			char *fields[10]={0,0,0,0,0,0,0,0,0,0};
+			fields[1] = ciphertext;
+			alt = fmt_alias_check(format, ciphertext, fields);
+			if (alt) {
+				ciphertext = alt->methods.prepare(fields, alt);
+				format = alt;
+			}
+		}
+
 		piece = format->methods.split(ciphertext, index, format);
 
 		binary = format->methods.binary(piece);
@@ -827,8 +870,25 @@ static void ldr_load_pot_line(struct db_main *db, char *line)
 	struct db_password *current;
 
 	ciphertext = ldr_get_field(&line, db->options->field_sep_char);
-	if (format->methods.valid(ciphertext, format) != 1) return;
-
+	if (format->methods.valid(ciphertext, format) != 1) {
+		struct fmt_main *alt;
+		char *fields[10]={0,0,0,0,0,0,0,0,0,0};
+		fields[1] = ciphertext;
+		alt = fmt_alias_check(format, ciphertext, fields);
+		if (!alt) {
+			/* see if a prepare of the 'original'    */
+			/* for some formats, we could not USE    */
+			/* the alias code, and had to 'fix' them */
+			/* within the prepare function.          */
+			char *cp = format->methods.prepare(fields, format);
+			if (!cp)
+				return;
+			if (format->methods.valid(cp, format) != 1)
+				return;
+		}
+		format = alt;
+	}
+	/* NOTE, should prepare be called here!!!!!, or possibly before the initial call to valid() ??? */
 	ciphertext = format->methods.split(ciphertext, 0, format);
 	binary = format->methods.binary(ciphertext);
 	hash = db->password_hash_func(binary);
@@ -842,9 +902,12 @@ static void ldr_load_pot_line(struct db_main *db, char *line)
 			continue;
 		if (memcmp(binary, current->binary, format->params.binary_size))
 			continue;
+		/* this check MAY NOT always be valid, for alias's */
+		/*
 		if (strcmp(ciphertext,
 		    format->methods.source(current->source, current->binary)))
 			continue;
+		*/
 		current->binary = NULL; /* mark for removal */
 	} while ((current = current->next_hash));
 }

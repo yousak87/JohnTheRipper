@@ -43,6 +43,9 @@
 #define SALT_SIZE			0
 #define SALT_ALIGN			1
 
+#define FORMAT_TAG				"$MD5u$"
+#define TAG_LENGTH				(sizeof(FORMAT_TAG) - 1)
+
 #ifdef MMX_COEF
 #ifdef MD5_SSE_PARA
 #define BLOCK_LOOPS			1
@@ -72,14 +75,14 @@ static ARCH_WORD_32 crypt_key[BINARY_SIZE / 4];
 
 /* Note some plaintexts will be replaced in init() if running UTF-8 */
 static struct fmt_tests tests[] = {
-	{"16c47151c18ac087cd12b3a70746c790", "test1"},
+	{FORMAT_TAG"16c47151c18ac087cd12b3a70746c790", "test1"},
 	{"d41d8cd98f00b204e9800998ecf8427e", ""},
 	{"d41d8cd98f00b204e9800998ecf8427e", ""},
 	{"d41d8cd98f00b204e9800998ecf8427e", ""},
-	{"d41d8cd98f00b204e9800998ecf8427e", ""},
+	{FORMAT_TAG"d41d8cd98f00b204e9800998ecf8427e", ""},
 	{"d41d8cd98f00b204e9800998ecf8427e", ""},
 	{"9c3abef89ff76f8acd80eae37b35f64f", "test2"},
-	{"849ee1b88b5d887bdb058180a666b450", "test3"},
+	{FORMAT_TAG"849ee1b88b5d887bdb058180a666b450", "test3"},
 	{"8c4cb7e8b33b56a833cdaa8673f3b425", "test4"},
 	{"537e738b1ac5551f65106368dc301ece", "thatsworking"},
 	{NULL}
@@ -136,17 +139,16 @@ static void init(struct fmt_main *self)
 
 static char *split(char *ciphertext, int index, struct fmt_main *self)
 {
-	static char out[32+12+1];
+	static char out[CIPHERTEXT_LENGTH+TAG_LENGTH+1];
 
-	if (!strncmp(ciphertext, "$dynamic_29$", 12))
-		ciphertext += 12;
+	if (!strncmp(ciphertext, FORMAT_TAG, TAG_LENGTH))
+		ciphertext += TAG_LENGTH;
 
-	strcpy(out, "$dynamic_29$");
+	strcpy(out, FORMAT_TAG);
 
-	memcpy(&out[12], ciphertext, 32);
-	out[sizeof(out)-1] = 0;
+	memcpy(&out[TAG_LENGTH], ciphertext, CIPHERTEXT_LENGTH+1);
 
-	strlwr(&out[12]);
+	strlwr(&out[TAG_LENGTH]);
 
 	return out;
 }
@@ -155,8 +157,8 @@ static int valid(char *ciphertext, struct fmt_main *self)
 {
 	char *pos;
 
-	if (!strncmp(ciphertext, "$dynamic_29$", 12))
-		ciphertext += 12;
+	if (!strncmp(ciphertext, FORMAT_TAG, TAG_LENGTH))
+		ciphertext += TAG_LENGTH;
 
 	for (pos = ciphertext; atoi16[ARCH_INDEX(*pos)] != 0x7F; pos++);
 
@@ -176,7 +178,7 @@ static void *binary(char *ciphertext)
 	unsigned int i;
 	unsigned int temp;
 
-	ciphertext+=12;
+	ciphertext+=TAG_LENGTH;
 	for (i=0; i<4; i++)
 	{
 		temp  = (atoi16[ARCH_INDEX(ciphertext[i*8+0])])<<4;
@@ -428,6 +430,27 @@ static char *get_key(int index)
 #endif
 }
 
+static char *source(char *source, void *binary)
+{
+	static char Buf[CIPHERTEXT_LENGTH + TAG_LENGTH + 1];
+	unsigned char *cpi;
+	char *cpo;
+	int i;
+
+	strcpy(Buf, FORMAT_TAG);
+	cpo = &Buf[TAG_LENGTH];
+
+	cpi = (unsigned char*)(binary);
+
+	for (i = 0; i < BINARY_SIZE; ++i) {
+		*cpo++ = itoa16[(*cpi)>>4];
+		*cpo++ = itoa16[*cpi&0xF];
+		++cpi;
+	}
+	*cpo = 0;
+	return Buf;
+}
+
 static int cmp_all(void *binary, int count) {
 #ifdef MMX_COEF
 	unsigned int x,y=0;
@@ -575,7 +598,7 @@ struct fmt_main fmt_rawmd5uthick = {
 #if (BLOCK_LOOPS > 1) && defined(SSE_MD5_PARA)
 		FMT_OMP |
 #endif
-		FMT_CASE | FMT_8_BIT | FMT_UNICODE | FMT_UTF8,
+		FMT_CASE | FMT_8_BIT | FMT_UNICODE | FMT_UTF8 | FMT_SPLIT_UNIFIES_CASE,
 #if FMT_MAIN_VERSION > 11
 		{ NULL },
 #endif
@@ -592,7 +615,7 @@ struct fmt_main fmt_rawmd5uthick = {
 #if FMT_MAIN_VERSION > 11
 		{ NULL },
 #endif
-		fmt_default_source,
+		source,
 		{
 			fmt_default_binary_hash_0,
 			fmt_default_binary_hash_1,

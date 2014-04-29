@@ -132,6 +132,19 @@ static char *split(char *ciphertext, int index, struct fmt_main *self)
 	return out;
 }
 
+static char *prepare(char *split_fields[10], struct fmt_main *self)
+{
+	static char out[TAG_LENGTH + CIPHERTEXT_LENGTH + 1];
+
+	if (split_fields[1][0] == '$' && !strncmp(split_fields[1], "$dynamic_80$", 12) && strlen(split_fields[1]) == 12+CIPHERTEXT_LENGTH) {
+		sprintf(out, "%s%s", FORMAT_TAG, &split_fields[1][12]);
+		if (valid(out,self))
+			return out;
+	}
+	return split_fields[1];
+}
+
+
 static void *binary(char *ciphertext)
 {
 	static unsigned char *out;
@@ -353,7 +366,7 @@ struct fmt_main fmt_raw0_SHA512 = {
 		init,
 		fmt_default_done,
 		fmt_default_reset,
-		fmt_default_prepare,
+		prepare,
 		valid,
 		split,
 		binary,
