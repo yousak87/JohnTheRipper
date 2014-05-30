@@ -26,6 +26,7 @@ struct fmt_main;
 
 extern void fmt_alias_init();
 extern struct fmt_main *fmt_alias_check(struct fmt_main *pFmt, const char *hash, char *fields[10]);
+extern struct fmt_main *alias_format_by_idx(char *ciphertext, struct fmt_main *pFmt, int idx);
 extern int dynamics_equal(const char *sig1, const char *sig2);
 
 #endif

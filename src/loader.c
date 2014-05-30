@@ -443,7 +443,7 @@ static int ldr_split_line(char **login, char **ciphertext,
 			*ciphertext = prepared;
 			return valid;
 		}
-
+		
 		/* check to see if this is a 'valid' alias format for what we are checking */
 		alt = fmt_alias_check(*format, *ciphertext, fields);
 		if (alt) {
@@ -1496,10 +1496,14 @@ static void ldr_show_pot_line(struct db_main *db, char *line)
 	}
 
 	if (line) {
-/* If just one format was forced on the command line, insist on it */
-		if (!fmt_list->next &&
-		    !fmt_list->methods.valid(ciphertext, fmt_list))
-			return;
+/* If just one format was forced on the command line, insist on it, OR on an alias */
+		if (!fmt_list->next && !fmt_list->methods.valid(ciphertext, fmt_list)) {
+			char *split[10] = {0,ciphertext,0,0,0,0,0,0,0,0};
+			char *cp = fmt_list->methods.prepare(split, fmt_list);
+			if (!fmt_list->methods.valid(cp, fmt_list))
+				return;
+			ciphertext = cp;
+		}
 
 		pos = line;
 		do {
@@ -1539,7 +1543,7 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 {
 	int show, loop;
 	char source[LINE_BUFFER_SIZE];
-	struct fmt_main *format;
+	struct fmt_main *format, *alt;
 	char *(*split)(char *ciphertext, int index, struct fmt_main *self);
 	int index, count, unify;
 	char *login, *ciphertext, *gecos, *home;
@@ -1556,8 +1560,10 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 		source, &format, db->options, line);
 	if (!count) return;
 
-/* If just one format was forced on the command line, insist on it */
-	if (!fmt_list->next && !format) return;
+/* If just one format was forced on the command line, insist on it, OR on an alias */
+	if (!fmt_list->next && !format) {
+		return;
+	}
 
 	show = !(db->options->flags & DB_PLAINTEXTS);
 
@@ -1595,62 +1601,76 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 	} else
 	for (found = pass = 0; pass == 0 || (pass == 1 && found); pass++)
 	for (index = 0; index < count; index++) {
-		piece = split(ciphertext, index, format);
-		if (unify)
-			piece = strcpy(mem_alloc(strlen(piece) + 1), piece);
+		int alias_idx = 0;
+		alt = format;
+		for (;alt;) {
+			if (alt) {
+				char *flds[10] = {0,ciphertext,0,0,0,0,0,0,0,0};
+				ciphertext = alt->methods.prepare(flds, alt);
+			}
+			piece = split(ciphertext, index, alt);
+			if (unify)
+				piece = strcpy(mem_alloc(strlen(piece) + 1), piece);
 
-		hash = ldr_cracked_hash(piece);
+			hash = ldr_cracked_hash(piece);
 
-		if ((current = db->cracked_hash[hash]))
-		do {
-			char *pot = current->ciphertext;
-			if (!strcmp(pot, piece))
-				break;
+			if ((current = db->cracked_hash[hash]))
+			do {
+				char *pot = current->ciphertext;
+				if (!strcmp(pot, piece))
+					break;
 /* This extra check, along with ldr_cracked_hash() being case-insensitive,
  * is only needed for matching some pot file records produced by older
  * versions of John and contributed patches where split() didn't unify the
  * case of hex-encoded hashes. */
-			if (unify &&
-			    format->methods.valid(pot, format) == 1 &&
-			    !strcmp(split(pot, 0, format), piece))
-				break;
-		} while ((current = current->next));
+				if (unify &&
+					alt->methods.valid(pot, alt) == 1 &&
+					!strcmp(split(pot, 0, alt), piece))
+					break;
+			} while ((current = current->next));
 
-		if (unify)
-			MEM_FREE(piece);
+			if (unify)
+				MEM_FREE(piece);
 
-		if (pass) {
-			chars = 0;
-			if (show || loop) {
-				if (format)
-					chars = format->params.plaintext_length;
-				if (index < count - 1 && current &&
-				    (pers_opts.store_utf8 ?
-				     (int)strlen8((UTF8*)current->plaintext) :
-				     (int)strlen(current->plaintext)) != chars)
-					current = NULL;
-			}
+			if (pass) {
+				chars = 0;
+				if (show || loop) {
+					if (alt)
+						chars = alt->params.plaintext_length;
+					if (index < count - 1 && current &&
+						(pers_opts.store_utf8 ?
+						 (int)strlen8((UTF8*)current->plaintext) :
+						 (int)strlen(current->plaintext)) != chars)
+						current = NULL;
+				}
 
-			if (current) {
-				if (show) {
-					printf("%s", current->plaintext);
-				} else if (loop) {
-					strcat(joined, current->plaintext);
+				if (current) {
+					if (show) {
+						printf("%s", current->plaintext);
+					} else if (loop) {
+						strcat(joined, current->plaintext);
+					} else
+						list_add(db->plaintexts,
+							current->plaintext);
+
+					db->guess_count++;
 				} else
-					list_add(db->plaintexts,
-						current->plaintext);
-
-				db->guess_count++;
-			} else
-			if (!loop)
+				if (!loop)
 			while (chars--)
 				putchar('?');
-		} else
-		if (current) {
-			found = 1;
-			if (show) printf("%s%c", login,
-			                 db->options->field_sep_char);
-			break;
+			} else
+			if (current) {
+				found = 1;
+				if (show) printf("%s%c", login,
+								 db->options->field_sep_char);
+				break;
+			}
+			//alt = alias_format_by_idx(ciphertext, alt, alias_idx++);
+			//if (alt == format)
+			//	alt = alias_format_by_idx(ciphertext, alt, alias_idx++);
+			//if (alt)
+			//	split = alt->methods.split;
+			alt = 0;
 		}
 	}
 

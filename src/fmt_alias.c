@@ -51,7 +51,7 @@ static int nAlias, nCurList=-1, bInit;
 
 static void fmt_alias_load(const char *alias_list) {
 	struct fmt_main *p;
-	struct alias_list *tail;
+	struct alias_list *tail; 
 	char *cp, *Buf = (char*)malloc(strlen(alias_list)+1);
 	int cnt = 0;
 	int nDynaCnt = 0;
@@ -176,6 +176,39 @@ int dynamics_equal(const char *sig1, const char *sig2) {
 		}
 		if (cnt == 1) return 0;
 		if (cnt == 2) return 1;
+	}
+	return 0;
+}
+
+struct fmt_main *alias_format_by_idx(char *ciphertext, struct fmt_main *pFmt, int idx) {
+	int i;
+	struct alias_list *p;
+	int nCurList = -1;
+
+	for (i = 0; i < nAlias; ++i) {
+		p = a_list[i];
+		while (p) {
+			if (!strcmp(pFmt->params.label, p->fmt->params.label)) {
+				// found it!
+				nCurList = i;
+				PRINTF2 ("Found our format in alias[%d]\n", i);
+				break;
+			}
+			p = p->next;
+		}
+		if (nCurList != -1) {
+			int j = 0;
+			p = a_list[i];
+			if (!p)
+				return 0;
+			while (j < idx) {
+				p = p->next;
+				if (!p)
+					return 0;
+				++j;
+			}
+			return p->fmt;
+		}
 	}
 	return 0;
 }

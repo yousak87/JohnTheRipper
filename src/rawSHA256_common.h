@@ -117,10 +117,12 @@ static char *split(char *ciphertext, int index, struct fmt_main *self)
 
 	if (!strncmp(ciphertext, HEX_TAG, HEX_TAG_LEN))
 		return ciphertext;
-
-	memcpy(out, HEX_TAG, HEX_TAG_LEN);
-	memcpy(out + HEX_TAG_LEN, ciphertext, HEX_CIPHERTEXT_LENGTH + 1);
-	strlwr(out + HEX_TAG_LEN);
-	return out;
+	if (strlen(ciphertext) == HEX_CIPHERTEXT_LENGTH) {
+		memcpy(out, HEX_TAG, HEX_TAG_LEN);
+		memcpy(out + HEX_TAG_LEN, ciphertext, HEX_CIPHERTEXT_LENGTH + 1);
+		strlwr(out + HEX_TAG_LEN);
+		return out;
+	}
+	return  ciphertext;
 }
 #endif
